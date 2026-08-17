@@ -7,6 +7,11 @@ import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './mo
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
+// Cloudflare Worker relay in front of the Census batch geocoder (see
+// tools/cloudflare-worker.js) -- lets the Geocode button work from any
+// browser, on any computer, with no local server and no install.
+const GEOCODE_RELAY_URL = 'https://atlasviewer.vesvelid.workers.dev';
+
 const state = {
   brands: [],           // [{id, name, color}]
   accounts: [],          // all accounts, all brands
@@ -292,10 +297,11 @@ function importSnapshot() {
 }
 
 // ---------------------------------------------------------------
-// Geocoding -- one button, talks to the local server started via
-// `node tools/server.mjs`. Falls back to the manual export/run-script/
-// import flow only if that server isn't reachable (e.g. the app is open
-// via the GitHub Pages URL instead of http://localhost:8181).
+// Geocoding -- one button, calls the Cloudflare Worker relay (see
+// tools/cloudflare-worker.js). Works from any browser, any computer,
+// no local server or install needed. Falls back to a manual export/
+// run-script/import flow only if the relay itself is unreachable
+// (e.g. no internet, or the relay was deleted/renamed).
 // ---------------------------------------------------------------
 
 async function geocodeBrandNow(brandId, btn) {
@@ -313,14 +319,14 @@ async function geocodeBrandNow(brandId, btn) {
   btn.textContent = '…';
 
   try {
-    const res = await fetch('/api/geocode', {
+    const res = await fetch(GEOCODE_RELAY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         addresses: pending.map((a) => ({ id: a.id, address: a.address, city: a.city, state: a.state || 'MI', zip: a.zip })),
       }),
     });
-    if (!res.ok) throw new Error(`server returned ${res.status}`);
+    if (!res.ok) throw new Error(`relay returned ${res.status}`);
     const { results } = await res.json();
 
     const updated = accts.map((a) => {
@@ -336,10 +342,9 @@ async function geocodeBrandNow(brandId, btn) {
     alert(`${brand.name}: geocoded ${matched} of ${accts.length} accounts.`);
   } catch (err) {
     const useManual = confirm(
-      `Couldn't reach the local geocoding helper (${err.message}).\n\n` +
-      `Make sure you started it: run "node tools/server.mjs" in the AccountAtlas folder, ` +
-      `then open http://localhost:8181 instead of this page.\n\n` +
-      `Click OK to use the manual export/import fallback instead.`
+      `Couldn't reach the geocoding service (${err.message}).\n\n` +
+      `Check your internet connection and try again.\n\n` +
+      `Click OK to use the manual export/run-script/import fallback instead.`
     );
     if (useManual) {
       exportAddressesForGeocoding(brand, pending);
