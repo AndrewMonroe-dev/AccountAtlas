@@ -142,6 +142,7 @@ function renderFilters() {
   const cur = sel.value;
   sel.innerHTML = '<option value="">All counties</option>' + counties.map((c) => `<option value="${c}">${c}</option>`).join('');
   sel.value = state.filterCounty || cur || '';
+  document.getElementById('clear-county-filter').hidden = !state.filterCounty;
 }
 
 function renderStats() {
@@ -362,7 +363,12 @@ function openReviewModal() {
 // ---------------------------------------------------------------
 
 async function main() {
-  await initMap('leaflet-map', { onCountyClickFn: (name) => { state.filterCounty = name; render(); flyToCounty(name); } });
+  // Clicking a county on the map navigates there ONLY -- it must never
+  // silently filter the data too. That combination is exactly what made
+  // pins vanish on zoom-out before: a stray click set an invisible county
+  // filter, and zooming back out kept showing just that one county instead
+  // of everything, with no on-screen sign the filter was even active.
+  await initMap('leaflet-map', { onCountyClickFn: (name) => { flyToCounty(name); } });
   await loadAll();
   await recomputeMatches();
   render();
@@ -377,6 +383,11 @@ async function main() {
   document.getElementById('gap-has').addEventListener('change', (e) => { state.gapHas = e.target.value; render(); });
   document.getElementById('gap-missing').addEventListener('change', (e) => { state.gapMissing = e.target.value; render(); });
   document.getElementById('filter-county').addEventListener('change', (e) => { state.filterCounty = e.target.value; render(); });
+  document.getElementById('clear-county-filter').addEventListener('click', () => {
+    state.filterCounty = '';
+    document.getElementById('filter-county').value = '';
+    render();
+  });
 
   document.getElementById('review-badge').addEventListener('click', openReviewModal);
   document.getElementById('review-close').addEventListener('click', () => { document.getElementById('review-modal').hidden = true; });
