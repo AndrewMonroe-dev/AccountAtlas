@@ -2,6 +2,7 @@ import * as db from './core/db.js';
 import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js';
 import { buildMatches } from './data/matcher.js';
 import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js';
+import { exportBrandSnapshot, parseSnapshotFile } from './data/snapshot.js';
 import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './modules/mapView.js';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
@@ -101,6 +102,7 @@ function renderBrandList() {
         <div class="bsub">${accts.length} accounts &middot; ${geocoded} mapped</div>
       </div>
       <button class="icon-btn geocode-btn" title="Geocode this brand's accounts" data-action="geocode" data-id="${b.id}">&#128205;</button>
+      <button class="icon-btn" title="Export a portable snapshot (data + coordinates) to move to another computer" data-action="export-snapshot" data-id="${b.id}">&#128190;</button>
       <button class="toggle ${state.activeBrandIds.has(b.id) ? 'on' : ''}" data-action="toggle-brand" data-id="${b.id}"></button>
     `;
     el.appendChild(row);
@@ -115,6 +117,13 @@ function renderBrandList() {
   });
   el.querySelectorAll('[data-action="geocode"]').forEach((btn) => {
     btn.addEventListener('click', () => geocodeBrandNow(btn.dataset.id, btn));
+  });
+  el.querySelectorAll('[data-action="export-snapshot"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const brand = state.brands.find((b) => b.id === btn.dataset.id);
+      const accts = state.accounts.filter((a) => a.brandId === brand.id);
+      exportBrandSnapshot(brand, accts);
+    });
   });
 
   const gapHasSel = document.getElementById('gap-has');
@@ -234,6 +243,52 @@ async function handleUpload() {
   state.activeBrandIds.add(brandId);
   await recomputeMatches();
   render();
+}
+
+// ---------------------------------------------------------------
+// Snapshot import -- brings in a brand's full data (including already-
+// resolved coordinates) exported from another computer. No Excel, no
+// geocoding, no Node needed on the machine doing the importing.
+// ---------------------------------------------------------------
+
+function importSnapshot() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+
+    let parsed;
+    try {
+      parsed = await parseSnapshotFile(file);
+    } catch (err) {
+      alert('Could not import: ' + err.message);
+      return;
+    }
+
+    const incomingBrand = parsed.brand;
+    const existing = state.brands.find((b) => b.name.toLowerCase() === incomingBrand.name.toLowerCase());
+    if (existing) {
+      const ok = confirm(`"${incomingBrand.name}" already exists (${state.accounts.filter((a) => a.brandId === existing.id).length} accounts). Replace it with this snapshot?`);
+      if (!ok) return;
+      await db.deleteBrand(existing.id);
+    }
+
+    const brandId = existing ? existing.id : (incomingBrand.id || crypto.randomUUID());
+    const color = existing ? existing.color : BRAND_COLORS[state.brands.length % BRAND_COLORS.length];
+    await db.putBrand({ ...incomingBrand, id: brandId, color });
+    await db.putAccounts(parsed.accounts.map((a) => ({ ...a, brandId })));
+
+    await loadAll();
+    state.activeBrandIds.add(brandId);
+    await recomputeMatches();
+    render();
+
+    const mapped = parsed.accounts.filter((a) => a.lat !== null && a.lon !== null).length;
+    alert(`Imported "${incomingBrand.name}": ${parsed.accounts.length} accounts, ${mapped} already mapped.`);
+  });
+  input.click();
 }
 
 // ---------------------------------------------------------------
@@ -412,6 +467,7 @@ async function main() {
   render();
 
   document.getElementById('add-brand-btn').addEventListener('click', openUploadModal);
+  document.getElementById('import-snapshot-btn').addEventListener('click', importSnapshot);
   document.getElementById('upload-cancel').addEventListener('click', closeUploadModal);
   document.getElementById('upload-submit').addEventListener('click', handleUpload);
 
