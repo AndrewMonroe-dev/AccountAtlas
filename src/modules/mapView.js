@@ -11,6 +11,21 @@ let onCountyClick = null;
 const MI_CENTER = [44.6, -85.4];
 const MI_ZOOM = 6;
 
+// County names typed into a real Excel by a real person rarely match the
+// map's canonical Census spelling exactly -- "St. Clair" vs "Saint Clair"
+// vs "st clair county" vs trailing whitespace. Every place county names
+// from account data get matched against the map's own names goes through
+// this instead of a raw ===.
+function normalizeCountyName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/\bcounty\b/g, '')
+    .replace(/[.,]/g, '')
+    .replace(/\bst\b/g, 'saint')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export async function initMap(containerId, { onCountyClickFn } = {}) {
   onCountyClick = onCountyClickFn || null;
 
@@ -44,13 +59,17 @@ function countyColor(pct) {
   return 'var(--unsold)';
 }
 
-// countyStats: Map<countyName, {sold, total}>
+// countyStats: Map<countyName, {sold, total}> -- countyName as typed in
+// the source Excel, not necessarily matching the map's own spelling.
 export function renderChoropleth(countyStats) {
   if (countyLayer) { map.removeLayer(countyLayer); }
 
+  const normalizedStats = new Map();
+  countyStats.forEach((v, k) => normalizedStats.set(normalizeCountyName(k), v));
+
   countyLayer = L.geoJSON(countyGeoJson, {
     style: (feature) => {
-      const stats = countyStats.get(feature.properties.name);
+      const stats = normalizedStats.get(normalizeCountyName(feature.properties.name));
       const pct = stats && stats.total ? stats.sold / stats.total : null;
       return {
         color: 'var(--line)',
@@ -61,7 +80,7 @@ export function renderChoropleth(countyStats) {
     },
     onEachFeature: (feature, layer) => {
       const name = feature.properties.name;
-      const stats = countyStats.get(name);
+      const stats = normalizedStats.get(normalizeCountyName(name));
       const label = stats
         ? `<strong>${name} County</strong><br>${stats.sold} of ${stats.total} accounts sold`
         : `<strong>${name} County</strong><br>no accounts loaded`;
@@ -131,8 +150,12 @@ function escapeHtml(s) {
 }
 
 export function flyToCounty(countyName) {
-  const feature = countyGeoJson.features.find((f) => f.properties.name === countyName);
-  if (!feature) return;
+  const target = normalizeCountyName(countyName);
+  const feature = countyGeoJson.features.find((f) => normalizeCountyName(f.properties.name) === target);
+  if (!feature) {
+    console.warn(`No county on the map matches "${countyName}" (normalized: "${target}"). Map county names: ${countyGeoJson.features.map((f) => f.properties.name).join(', ')}`);
+    return;
+  }
   const layer = L.geoJSON(feature);
   map.fitBounds(layer.getBounds(), { padding: [40, 40] });
 }
