@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account Atlas</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="stylesheet" href="assets/css/map.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="wordmark">
+      <span class="name serif">Account Atlas</span>
+      <span class="place">Michigan Coverage</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search-input" type="text" placeholder="Search store name…">
+    </div>
+  </header>
+
+  <div class="main">
+    <aside class="sidebar">
+
+      <div class="section">
+        <div class="section-label">Brands on map</div>
+        <div class="brand-list" id="brand-list"></div>
+        <button class="ghost-btn" id="add-brand-btn">+ Upload brand spreadsheet</button>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Compare mode</div>
+        <div class="segmented" id="compare-segmented">
+          <button data-mode="overlay" class="active">Overlay</button>
+          <button data-mode="gap">Gap view</button>
+        </div>
+        <div class="gap-form" id="gap-form" style="display:none">
+          <div class="row"><span style="color:var(--ink-dim)">Has</span><select id="gap-has"></select></div>
+          <div class="row"><span class="arrow">&rarr; missing</span><select id="gap-missing"></select></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Filters</div>
+        <div class="filter-row">
+          <select id="filter-county"><option value="">All counties</option></select>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Coverage — visible brands</div>
+        <div class="stat-grid">
+          <div class="stat-card sold"><div class="num mono" id="stat-sold">0</div><div class="lbl">Sold accounts</div></div>
+          <div class="stat-card unsold"><div class="num mono" id="stat-unsold">0</div><div class="lbl">Unsold accounts</div></div>
+          <div class="penetration-bar"><div id="stat-bar" style="width:0%"></div></div>
+          <div class="lbl" id="stat-pct" style="grid-column:1/-1">0% penetration</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Legend</div>
+        <div class="legend">
+          <div class="legend-row"><span class="dot" style="background:var(--sold)"></span> Sold</div>
+          <div class="legend-row"><span class="dot" style="background:var(--unsold)"></span> Unsold</div>
+          <div id="legend-brands"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Export</div>
+        <button class="ghost-btn" id="export-view-btn">Export current view to CSV</button>
+        <button class="link-btn" id="review-badge" hidden style="margin-top:6px">0 matches need review &rarr;</button>
+      </div>
+
+    </aside>
+
+    <div class="map-pane">
+      <div class="map-toolbar">
+        <div></div>
+        <div class="scale-note">County tint = sold vs. total penetration for visible brands. Zoom in to split clusters into individual accounts; click a pin for its full sold/unsold breakdown.</div>
+      </div>
+      <div id="leaflet-map"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Upload modal -->
+<div class="modal-backdrop" id="upload-modal" hidden>
+  <div class="modal">
+    <h2>Upload a brand spreadsheet</h2>
+    <div class="field">
+      <label for="upload-name">Brand name</label>
+      <input type="text" id="upload-name" placeholder="e.g. Ridgeline Cellars">
+    </div>
+    <div class="field">
+      <label for="upload-file">Excel file</label>
+      <input type="file" id="upload-file" accept=".xlsx,.xls">
+      <div class="hint">Columns A–G: Store Full Name, Store Number, Store Address, City, County, State, Zip Code. Every column after that is one SKU — any value other than "-" or blank counts as sold.</div>
+    </div>
+    <div class="warn-list" id="upload-warnings"></div>
+    <div class="modal-actions">
+      <button class="ghost-btn" id="upload-cancel">Cancel</button>
+      <button class="solid-btn" id="upload-submit">Upload</button>
+    </div>
+  </div>
+</div>
+
+<!-- Match review modal -->
+<div class="modal-backdrop" id="review-modal" hidden>
+  <div class="modal">
+    <h2>Review uncertain matches</h2>
+    <div class="hint">These accounts look similar across brands but weren't confident enough to auto-link. Confirm or reject each one.</div>
+    <div id="review-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+    <div class="modal-actions">
+      <button class="ghost-btn" id="review-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

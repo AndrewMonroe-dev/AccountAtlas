@@ -1,0 +1,22 @@
+/* Leaflet popup content -- Leaflet renders these in its own DOM subtree, so
+   token colors still apply since it's the same document. */
+.leaflet-popup-content-wrapper { background: var(--panel); color: var(--ink); border-radius: 10px; box-shadow: var(--shadow); }
+.leaflet-popup-tip { background: var(--panel); }
+.county-tooltip { background: var(--panel); color: var(--ink); border: 1px solid var(--line); font-size: 12px; }
+
+.map-popup .pname { font-size: 13.5px; margin-bottom: 1px; font-weight: 600; }
+.map-popup .paddr { font-size: 11px; color: var(--ink-dim); margin-bottom: 9px; }
+.map-popup .fam { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); margin: 8px 0 5px; }
+.map-popup .chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.map-popup .chip { font-size: 10.5px; padding: 3px 7px; border-radius: 999px; background: var(--sold-bg); color: var(--sold); }
+.map-popup .chip.unsold { background: var(--unsold-bg); color: var(--unsold); }
+.map-popup .chip-empty { font-size: 10.5px; color: var(--ink-dim); }
+
+.marker-cluster-small, .marker-cluster-medium, .marker-cluster-large {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.marker-cluster-small div, .marker-cluster-medium div, .marker-cluster-large div {
+  background: color-mix(in srgb, var(--accent) 85%, transparent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
