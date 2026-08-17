@@ -1,5 +1,5 @@
 import * as db from './core/db.js';
-import { parseBrandWorkbook, brandStats } from './data/excelParser.js';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js';
 import { buildMatches } from './data/matcher.js';
 import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js';
 import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './modules/mapView.js';
@@ -185,6 +185,23 @@ async function handleUpload() {
   if (!name || !file) { alert('Brand name and a file are both required.'); return; }
 
   const existing = state.brands.find((b) => b.name.toLowerCase() === name.toLowerCase());
+
+  // Build carry-forward data BEFORE anything is deleted: this brand's own
+  // prior accounts (so an unchanged address keeps its geocode on replace),
+  // plus every already-geocoded address across ALL brands (so a new brand
+  // at an already-mapped store skips geocoding entirely).
+  const previousById = {};
+  if (existing) {
+    const oldAccounts = await db.getAccountsByBrand(existing.id);
+    oldAccounts.forEach((a) => { previousById[a.id] = a; });
+  }
+  const addressIndex = {};
+  state.accounts.forEach((a) => {
+    if (a.geocodeStatus === 'ok' && a.lat !== null && a.lon !== null) {
+      addressIndex[normalizeAddressKey(a.address, a.city, a.state, a.zip)] = { lat: a.lat, lon: a.lon };
+    }
+  });
+
   if (existing) {
     const ok = confirm(`"${name}" already exists (${state.accounts.filter((a) => a.brandId === existing.id).length} accounts). Replace it?`);
     if (!ok) return;
@@ -195,7 +212,7 @@ async function handleUpload() {
   const brandId = existing ? existing.id : crypto.randomUUID();
   let parsed;
   try {
-    parsed = parseBrandWorkbook(buf, brandId);
+    parsed = parseBrandWorkbook(buf, brandId, { previousById, addressIndex });
   } catch (err) {
     document.getElementById('upload-warnings').textContent = 'Could not parse file: ' + err.message;
     return;

@@ -92,13 +92,13 @@ export function renderPins(accounts, brandsById) {
     if (acct.lat === null || acct.lon === null) return;
     const brand = brandsById[acct.brandId];
     const sold = Object.values(acct.skus).some(Boolean);
-    const color = sold ? getCssVar('--sold') : getCssVar('--unsold');
     const marker = L.circleMarker([acct.lat, acct.lon], {
-      radius: 7,
-      color: brand ? brand.color : '#888',
-      weight: 2,
-      fillColor: color,
-      fillOpacity: 0.9,
+      radius: sold ? 8 : 6,
+      color: sold ? getCssVar('--pin-sold-stroke') : (brand ? brand.color : getCssVar('--pin-unsold-stroke')),
+      weight: sold ? 1.5 : 2,
+      fillColor: sold ? getCssVar('--pin-sold') : getCssVar('--pin-unsold'),
+      fillOpacity: sold ? 0.95 : 0.85,
+      className: sold ? 'pin-sold-glow' : 'pin-unsold',
     });
     marker.bindPopup(popupHtml(acct, brand), { maxWidth: 260 });
     clusterGroup.addLayer(marker);

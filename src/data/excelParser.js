@@ -24,8 +24,22 @@ function makeAccountId(brandId, storeNumber, storeName, address) {
   return `${brandId}::${key}`;
 }
 
-// workbookArrayBuffer: ArrayBuffer from a File. Returns { accounts, skuList, warnings }.
-export function parseBrandWorkbook(workbookArrayBuffer, brandId) {
+// Key used to recognize "this is the same physical address" across brands
+// and across re-uploads, independent of the account's id (which is scoped
+// to one brand).
+export function normalizeAddressKey(address, city, state, zip) {
+  return [address, city, state, zip].map((v) => String(v || '').trim().toLowerCase()).join('|');
+}
+
+// workbookArrayBuffer: ArrayBuffer from a File.
+// previousById: {accountId -> old account record}, from this SAME brand's
+//   prior upload (if replacing one) -- lets an unchanged address keep its
+//   coordinates instead of resetting to ungeocoded.
+// addressIndex: {normalizedAddressKey -> {lat, lon}}, from ANY already-
+//   geocoded account across ALL brands -- lets a new brand at a store
+//   that's already mapped skip geocoding entirely.
+// Returns { accounts, skuList, warnings }.
+export function parseBrandWorkbook(workbookArrayBuffer, brandId, { previousById = {}, addressIndex = {} } = {}) {
   const wb = XLSX.read(workbookArrayBuffer, { type: 'array' });
   const sheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
@@ -62,8 +76,25 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId) {
       skus[sku] = isSold(row[skuColOffset + i]);
     });
 
+    const id = makeAccountId(brandId, rec.storeNumber, rec.storeName, rec.address);
+    const prev = previousById[id];
+    const addrKey = normalizeAddressKey(rec.address, rec.city, rec.state, rec.zip);
+    const cached = addressIndex[addrKey];
+
+    let lat = null;
+    let lon = null;
+    let geocodeStatus = 'pending';
+    if (prev && prev.geocodeStatus === 'ok' && prev.lat !== null && prev.lon !== null) {
+      // Same brand, same id (same store number/name/address) -- carry the
+      // existing geocode forward instead of wiping it on re-upload.
+      lat = prev.lat; lon = prev.lon; geocodeStatus = 'ok';
+    } else if (cached) {
+      // A different brand already geocoded this exact address.
+      lat = cached.lat; lon = cached.lon; geocodeStatus = 'ok';
+    }
+
     accounts.push({
-      id: makeAccountId(brandId, rec.storeNumber, rec.storeName, rec.address),
+      id,
       brandId,
       storeName: rec.storeName,
       storeNumber: rec.storeNumber,
@@ -73,9 +104,9 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId) {
       state: rec.state || 'MI',
       zip: rec.zip,
       skus,
-      lat: null,
-      lon: null,
-      geocodeStatus: 'pending', // pending | ok | failed | manual
+      lat,
+      lon,
+      geocodeStatus, // pending | ok | failed | manual
       notes: '',
     });
   }

@@ -12,6 +12,13 @@
 .map-popup .chip.unsold { background: var(--unsold-bg); color: var(--unsold); }
 .map-popup .chip-empty { font-size: 10.5px; color: var(--ink-dim); }
 
+.pin-sold-glow {
+  filter: drop-shadow(0 0 3px var(--pin-sold)) drop-shadow(0 0 7px var(--pin-sold));
+}
+.pin-unsold {
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.3));
+}
+
 .marker-cluster-small, .marker-cluster-medium, .marker-cluster-large {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
