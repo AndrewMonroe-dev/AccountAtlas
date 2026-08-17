@@ -123,3 +123,14 @@ export async function bulkPutGeocodeCache(entries) {
   const store = tx(db, 'geocodeCache', 'readwrite');
   await Promise.all(entries.map((e) => reqToPromise(store.put(e))));
 }
+
+// Wipes every brand, account, match, and cached geocode -- everything the
+// app has ever stored in this browser. Used by "Clear all data."
+export async function clearAllData() {
+  const db = await openDb();
+  await Promise.all(
+    ['brands', 'accounts', 'matches', 'geocodeCache'].map(
+      (storeName) => reqToPromise(tx(db, storeName, 'readwrite').clear())
+    )
+  );
+}

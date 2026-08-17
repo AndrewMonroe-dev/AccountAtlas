@@ -501,6 +501,18 @@ async function main() {
     exportFilteredAccounts(unmappedAccounts(), brandsById(), 'account-atlas-unmapped.csv');
   });
 
+  document.getElementById('clear-all-btn').addEventListener('click', async () => {
+    const total = state.accounts.length;
+    const ok = confirm(
+      `This permanently deletes everything stored in this browser -- ${state.brands.length} brand(s), ${total} account(s), all coordinates. ` +
+      `This cannot be undone.\n\nType OK to confirm.`
+    );
+    if (!ok) return;
+    await db.clearAllData();
+    localStorage.removeItem('aa-match-overrides');
+    location.reload();
+  });
+
   document.getElementById('export-view-btn').addEventListener('click', () => {
     exportFilteredAccounts(visibleAccounts(), brandsById());
   });
