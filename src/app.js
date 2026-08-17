@@ -1,9 +1,9 @@
-import * as db from './core/db.js';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js';
-import { buildMatches } from './data/matcher.js';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js';
-import { exportBrandSnapshot, parseSnapshotFile } from './data/snapshot.js';
-import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './modules/mapView.js';
+import * as db from './core/db.js?v=20260817a';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20260817a';
+import { buildMatches } from './data/matcher.js?v=20260817a';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20260817a';
+import { exportBrandSnapshot, parseSnapshotFile } from './data/snapshot.js?v=20260817a';
+import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './modules/mapView.js?v=20260817a';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -504,8 +504,8 @@ async function main() {
   document.getElementById('clear-all-btn').addEventListener('click', async () => {
     const total = state.accounts.length;
     const ok = confirm(
-      `This permanently deletes everything stored in this browser -- ${state.brands.length} brand(s), ${total} account(s), all coordinates. ` +
-      `This cannot be undone.\n\nType OK to confirm.`
+      `Delete everything stored in this browser -- ${state.brands.length} brand(s), ${total} account(s), all coordinates?\n\n` +
+      `This cannot be undone. Click OK to delete, or Cancel to stop.`
     );
     if (!ok) return;
     await db.clearAllData();
