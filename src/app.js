@@ -99,8 +99,7 @@ function renderBrandList() {
         <div class="bname">${escapeHtml(b.name)}</div>
         <div class="bsub">${accts.length} accounts &middot; ${geocoded} mapped</div>
       </div>
-      <button class="icon-btn" title="Export addresses to geocode" data-action="export-geo" data-id="${b.id}">&#8681;</button>
-      <button class="icon-btn" title="Import coordinates" data-action="import-geo" data-id="${b.id}">&#8593;</button>
+      <button class="icon-btn geocode-btn" title="Geocode this brand's accounts" data-action="geocode" data-id="${b.id}">&#128205;</button>
       <button class="toggle ${state.activeBrandIds.has(b.id) ? 'on' : ''}" data-action="toggle-brand" data-id="${b.id}"></button>
     `;
     el.appendChild(row);
@@ -113,15 +112,8 @@ function renderBrandList() {
       render();
     });
   });
-  el.querySelectorAll('[data-action="export-geo"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const brand = state.brands.find((b) => b.id === btn.dataset.id);
-      const accts = state.accounts.filter((a) => a.brandId === brand.id);
-      exportAddressesForGeocoding(brand, accts);
-    });
-  });
-  el.querySelectorAll('[data-action="import-geo"]').forEach((btn) => {
-    btn.addEventListener('click', () => openImportCoordsDialog(btn.dataset.id));
+  el.querySelectorAll('[data-action="geocode"]').forEach((btn) => {
+    btn.addEventListener('click', () => geocodeBrandNow(btn.dataset.id, btn));
   });
 
   const gapHasSel = document.getElementById('gap-has');
@@ -226,7 +218,67 @@ async function handleUpload() {
 }
 
 // ---------------------------------------------------------------
-// Coordinate import
+// Geocoding -- one button, talks to the local server started via
+// `node tools/server.mjs`. Falls back to the manual export/run-script/
+// import flow only if that server isn't reachable (e.g. the app is open
+// via the GitHub Pages URL instead of http://localhost:8181).
+// ---------------------------------------------------------------
+
+async function geocodeBrandNow(brandId, btn) {
+  const brand = state.brands.find((b) => b.id === brandId);
+  const accts = state.accounts.filter((a) => a.brandId === brandId);
+  const pending = accts.filter((a) => a.geocodeStatus !== 'ok');
+
+  if (!pending.length) {
+    alert(`${brand.name}: all ${accts.length} accounts are already mapped.`);
+    return;
+  }
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  try {
+    const res = await fetch('/api/geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        addresses: pending.map((a) => ({ id: a.id, address: a.address, city: a.city, state: a.state || 'MI', zip: a.zip })),
+      }),
+    });
+    if (!res.ok) throw new Error(`server returned ${res.status}`);
+    const { results } = await res.json();
+
+    const updated = accts.map((a) => {
+      const c = results[a.id];
+      if (!c) return a;
+      return { ...a, lat: c.matched ? c.lat : null, lon: c.matched ? c.lon : null, geocodeStatus: c.matched ? 'ok' : 'failed' };
+    });
+    await db.putAccounts(updated);
+    await loadAll();
+    render();
+
+    const matched = updated.filter((a) => a.geocodeStatus === 'ok').length;
+    alert(`${brand.name}: geocoded ${matched} of ${accts.length} accounts.`);
+  } catch (err) {
+    const useManual = confirm(
+      `Couldn't reach the local geocoding helper (${err.message}).\n\n` +
+      `Make sure you started it: run "node tools/server.mjs" in the AccountAtlas folder, ` +
+      `then open http://localhost:8181 instead of this page.\n\n` +
+      `Click OK to use the manual export/import fallback instead.`
+    );
+    if (useManual) {
+      exportAddressesForGeocoding(brand, pending);
+      openImportCoordsDialog(brandId);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+// ---------------------------------------------------------------
+// Coordinate import (manual fallback path only)
 // ---------------------------------------------------------------
 
 function openImportCoordsDialog(brandId) {

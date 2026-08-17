@@ -12,21 +12,24 @@ repo is code and public Michigan county geometry, nothing else — see
 
 ## Using it
 
+**Start the local helper first, once per session:**
+```
+node tools/server.mjs
+```
+Then open **http://localhost:8181** — not the GitHub Pages link. Leave that
+terminal window running in the background; it's what makes the one-click
+"Geocode" button work (see "Why a local server" below). Everything else
+about the app works the same whether you use this local URL or Pages —
+this only matters for the geocode step.
+
 1. **Upload a brand.** Sidebar → "Upload brand spreadsheet." Columns A–G must
    be, in order: Store Full Name, Store Number, Store Address, City, County,
    State, Zip Code. Every column after G is one SKU — any cell holding
    anything other than `-` or blank counts as sold for that SKU.
-2. **Geocode it.** The Excel has no coordinates, so pins need a one-time
-   lookup. Click the ↓ button on the brand row to export its address list,
-   then run:
-   ```
-   node tools/geocode.mjs your-brand-addresses.csv
-   ```
-   This calls the U.S. Census Bureau's official batch geocoder — free, no
-   API key, no billing. It writes a `.coords.json` file next to the CSV.
-   Click the ↑ button on the same brand row and pick that file to import the
-   coordinates. (This step runs locally because the Census API doesn't allow
-   direct calls from a browser — see "Why a local step" below.)
+2. **Geocode it.** Click the 📍 button on the brand row. That's it — it
+   calls the local helper, which hits the U.S. Census Bureau's official
+   batch geocoder (free, no API key, no billing) and reports back matched
+   coordinates in a few seconds, no file to download or re-upload.
 3. **Compare.** Toggle brands on/off to overlay them on one map, or switch
    to "Gap view" and pick a Has/Missing pair to see only the accounts that
    carry one brand but not the other — a direct sales-call target list.
@@ -35,15 +38,35 @@ repo is code and public Michigan county geometry, nothing else — see
 
 Uploading a brand a second time asks before replacing its existing data.
 
-## Why a local step for geocoding
+## Why a local server
 
-Neither the Census Bureau's geocoder nor OpenStreetMap's Nominatim send
-`Access-Control-Allow-Origin` headers, so a browser `fetch()` to either is
-blocked outright — confirmed directly against both before building this,
-not assumed. Since this app is a static site with no backend, the fix is
-running the same official, free, no-key Census geocoder from Node instead
-of the browser, where CORS doesn't apply. It's a one-time step per brand,
-not per session — coordinates persist in IndexedDB after import.
+A browser button can never launch a program on your machine directly —
+that's a hard security boundary, not a limitation of this app. The fix is
+a small local process that stays running (`tools/server.mjs`): it serves
+the app itself AND exposes a `/api/geocode` endpoint the page can call
+same-origin, no CORS wall, no manual file round-trip.
+
+This is also why it has to be `http://localhost:8181` rather than the
+GitHub Pages URL — a page served over `https://` can't call a plain
+`http://localhost` endpoint either (browsers block that as mixed content),
+so the app needs to be served BY this same process for the button to
+reach it. Neither the Census Bureau's geocoder nor OpenStreetMap's
+Nominatim send `Access-Control-Allow-Origin` headers, so a direct browser
+`fetch()` to either is blocked outright regardless — confirmed directly
+against both before building this, not assumed.
+
+**Note:** `http://localhost:8181` and the GitHub Pages URL are different
+origins, so browser storage (IndexedDB) doesn't carry over between them —
+data uploaded/geocoded through one won't show up in the other. Use the
+local server as the primary way to run the app; Pages is there if you
+ever want to browse from a device where you don't want to run the
+command.
+
+If the local server isn't running when you click Geocode, the app tells
+you and offers the old manual fallback (export a CSV, run
+`node tools/geocode.mjs that-file.csv`, import the resulting
+`.coords.json`) — same underlying Census API, just without the one-click
+convenience.
 
 ## Cross-brand matching
 
@@ -80,4 +103,7 @@ Then open the printed localhost URL. No build step.
 - `data/geo/michigan-counties.geojson` — real Michigan county boundaries
   (U.S. Census Bureau cartographic boundary files, public domain). No
   account data.
-- `tools/geocode.mjs` — the local Census batch-geocoding helper.
+- `tools/server.mjs` — local server: serves the app at `http://localhost:8181`
+  and exposes `/api/geocode` for the in-app one-click Geocode button.
+- `tools/geocode.mjs` — standalone CLI fallback for the same Census
+  batch geocoder, used only if the local server isn't running.
