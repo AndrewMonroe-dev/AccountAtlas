@@ -80,6 +80,7 @@ function render() {
   renderFilters();
   renderStats();
   renderLegend();
+  renderUnmappedBadge();
   const accts = visibleAccounts();
   renderChoropleth(countyStatsFor(accts));
   renderPins(accts.filter((a) => a.lat !== null), brandsById());
@@ -327,6 +328,43 @@ async function recomputeMatches() {
   document.getElementById('review-badge').textContent = needsReview.length;
 }
 
+// ---------------------------------------------------------------
+// Unmapped accounts -- anything with no lat/lon, whether it's never been
+// geocoded yet or the geocoder genuinely couldn't match the address.
+// ---------------------------------------------------------------
+
+function unmappedAccounts() {
+  return state.accounts.filter((a) => a.lat === null || a.lon === null);
+}
+
+function renderUnmappedBadge() {
+  const badge = document.getElementById('unmapped-badge');
+  const count = unmappedAccounts().length;
+  badge.hidden = count === 0;
+  badge.textContent = `${count} account${count === 1 ? '' : 's'} not on map →`;
+}
+
+function openUnmappedModal() {
+  const list = document.getElementById('unmapped-list');
+  const accts = unmappedAccounts();
+  if (!accts.length) {
+    list.innerHTML = '<div class="hint">Everything is mapped.</div>';
+  } else {
+    list.innerHTML = accts.map((a) => {
+      const brand = brandsById()[a.brandId];
+      const statusLabel = a.geocodeStatus === 'failed' ? 'Address not found' : 'Not yet geocoded';
+      const statusClass = a.geocodeStatus === 'failed' ? 'unsold' : '';
+      return `
+        <div class="review-row">
+          <div><strong>${escapeHtml(a.storeName)}</strong> (${escapeHtml(brand ? brand.name : '')})</div>
+          <div class="hint">${escapeHtml(a.address)}, ${escapeHtml(a.city)}, ${escapeHtml(a.state)} ${escapeHtml(a.zip)}</div>
+          <div class="chip ${statusClass}" style="width:fit-content">${statusLabel}</div>
+        </div>`;
+    }).join('');
+  }
+  document.getElementById('unmapped-modal').hidden = false;
+}
+
 function openReviewModal() {
   const list = document.getElementById('review-list');
   const pending = window.__pendingReview || [];
@@ -395,6 +433,12 @@ async function main() {
 
   document.getElementById('review-badge').addEventListener('click', openReviewModal);
   document.getElementById('review-close').addEventListener('click', () => { document.getElementById('review-modal').hidden = true; });
+
+  document.getElementById('unmapped-badge').addEventListener('click', openUnmappedModal);
+  document.getElementById('unmapped-close').addEventListener('click', () => { document.getElementById('unmapped-modal').hidden = true; });
+  document.getElementById('unmapped-export').addEventListener('click', () => {
+    exportFilteredAccounts(unmappedAccounts(), brandsById(), 'account-atlas-unmapped.csv');
+  });
 
   document.getElementById('export-view-btn').addEventListener('click', () => {
     exportFilteredAccounts(visibleAccounts(), brandsById());
