@@ -382,7 +382,11 @@ async function main() {
   });
   document.getElementById('gap-has').addEventListener('change', (e) => { state.gapHas = e.target.value; render(); });
   document.getElementById('gap-missing').addEventListener('change', (e) => { state.gapMissing = e.target.value; render(); });
-  document.getElementById('filter-county').addEventListener('change', (e) => { state.filterCounty = e.target.value; render(); });
+  document.getElementById('filter-county').addEventListener('change', (e) => {
+    state.filterCounty = e.target.value;
+    render();
+    if (state.filterCounty) flyToCounty(state.filterCounty);
+  });
   document.getElementById('clear-county-filter').addEventListener('click', () => {
     state.filterCounty = '';
     document.getElementById('filter-county').value = '';
