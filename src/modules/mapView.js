@@ -7,6 +7,8 @@ let countyLayer = null;
 let clusterGroup = null;
 let countyGeoJson = null;
 let onCountyClick = null;
+let detailPanel = null;
+let detailBody = null;
 
 const MI_CENTER = [44.6, -85.4];
 const MI_ZOOM = 6;
@@ -28,6 +30,11 @@ function normalizeCountyName(name) {
 
 export async function initMap(containerId, { onCountyClickFn } = {}) {
   onCountyClick = onCountyClickFn || null;
+
+  detailPanel = document.getElementById('detail-panel');
+  detailBody = document.getElementById('detail-body');
+  const detailClose = document.getElementById('detail-close');
+  if (detailClose) detailClose.addEventListener('click', hideDetailPanel);
 
   map = L.map(containerId, { zoomControl: false }).setView(MI_CENTER, MI_ZOOM);
 
@@ -119,7 +126,7 @@ export function renderPins(accounts, brandsById) {
       fillOpacity: sold ? 0.95 : 0.85,
       className: sold ? 'pin-sold-glow' : 'pin-unsold',
     });
-    marker.bindPopup(popupHtml(acct, brand), { maxWidth: 260 });
+    marker.on('mouseover', () => showDetailPanel(acct, brand));
     clusterGroup.addLayer(marker);
   });
 }
@@ -128,7 +135,21 @@ function getCssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function popupHtml(acct, brand) {
+// The detail panel is deliberately sticky: it stays on screen until either
+// the X is clicked or another store is hovered (which just overwrites the
+// content below) -- no mouseout-hide, so it never disappears mid-look.
+function showDetailPanel(acct, brand) {
+  if (!detailPanel || !detailBody) return;
+  detailBody.innerHTML = detailHtml(acct, brand);
+  detailPanel.hidden = false;
+}
+
+function hideDetailPanel() {
+  if (!detailPanel) return;
+  detailPanel.hidden = true;
+}
+
+function detailHtml(acct, brand) {
   const soldSkus = Object.entries(acct.skus).filter(([, v]) => v).map(([k]) => k);
   const unsoldSkus = Object.entries(acct.skus).filter(([, v]) => !v).map(([k]) => k);
   const chip = (name, cls) => `<span class="chip ${cls}">${name}</span>`;

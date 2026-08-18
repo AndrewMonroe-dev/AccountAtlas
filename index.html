@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20260817a">
-<link rel="stylesheet" href="assets/css/app.css?v=20260817a">
-<link rel="stylesheet" href="assets/css/map.css?v=20260817a">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20260817b">
+<link rel="stylesheet" href="assets/css/app.css?v=20260817b">
+<link rel="stylesheet" href="assets/css/map.css?v=20260817b">
 </head>
 <body>
 <div class="app">
@@ -95,9 +95,13 @@
     <div class="map-pane">
       <div class="map-toolbar">
         <div></div>
-        <div class="scale-note">County tint = sold vs. total penetration for visible brands. Zoom in to split clusters into individual accounts; click a pin for its full sold/unsold breakdown.</div>
+        <div class="scale-note">County tint = sold vs. total penetration for visible brands. Zoom in to split clusters into individual accounts; hover a pin for its full sold/unsold breakdown.</div>
       </div>
       <div id="leaflet-map"></div>
+      <aside class="detail-panel" id="detail-panel" hidden>
+        <button class="detail-close" id="detail-close" title="Close" aria-label="Close">&times;</button>
+        <div id="detail-body"></div>
+      </aside>
     </div>
   </div>
 </div>
@@ -151,6 +155,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module" src="src/app.js?v=20260817a"></script>
+<script type="module" src="src/app.js?v=20260817b"></script>
 </body>
 </html>
