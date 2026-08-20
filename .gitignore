@@ -10,3 +10,4 @@
 *.coords.json
 data/uploads/
 node_modules/
+.wrangler/
