@@ -90,7 +90,6 @@ function render() {
   renderGapForm();
   renderFilters();
   renderStats();
-  renderLegend();
   renderUnmappedBadge();
   const accts = visibleAccounts();
   renderChoropleth(countyStatsFor(accts));
@@ -172,15 +171,6 @@ function renderStats() {
   document.getElementById('stat-unsold').textContent = stats.unsoldAccounts;
   document.getElementById('stat-bar').style.width = stats.penetrationPct + '%';
   document.getElementById('stat-pct').textContent = `${stats.penetrationPct}% penetration${state.compareMode === 'gap' ? ' gap' : ' (visible brands)'}`;
-}
-
-function renderLegend() {
-  const el = document.getElementById('legend-brands');
-  el.innerHTML = [...state.activeBrandIds].map((id) => {
-    const b = state.brands.find((x) => x.id === id);
-    if (!b) return '';
-    return `<div class="legend-row"><span class="legend-swatch" style="background:${b.color}"></span> ${escapeHtml(b.name)}</div>`;
-  }).join('');
 }
 
 function escapeHtml(s) {
