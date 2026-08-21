@@ -157,9 +157,11 @@
     <div class="hint">Either never geocoded yet (click Geocode on the brand row) or the address didn't match anything the Census geocoder recognizes -- usually a typo, a missing suite/unit getting in the way, or an address that's genuinely incomplete. Fix the address in your source Excel and re-upload to retry.</div>
     <div id="unmapped-list" style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;"></div>
     <div class="modal-actions">
+      <button class="ghost-btn" id="unmapped-retry-osm">Try free alternate geocoder (OpenStreetMap)</button>
       <button class="ghost-btn" id="unmapped-export">Export this list to CSV</button>
       <button class="ghost-btn" id="unmapped-close">Close</button>
     </div>
+    <div class="hint" id="unmapped-retry-status" style="margin-top:6px"></div>
   </div>
 </div>
 

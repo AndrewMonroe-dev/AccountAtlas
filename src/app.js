@@ -430,6 +430,64 @@ function openUnmappedModal() {
   document.getElementById('unmapped-modal').hidden = false;
 }
 
+// Andrew, 2026-08-21: free fallback for whatever the Census batch geocoder
+// (geocodeBrandNow above) couldn't match -- no API key, no billing, just
+// OpenStreetMap's public Nominatim search endpoint. Its usage policy caps
+// requests at 1/sec and requires they NOT run in parallel, so this is
+// deliberately sequential with a throttle -- slow for a big batch (roughly
+// 1 address/sec), but free and policy-compliant, which is the actual
+// tradeoff Andrew chose over a paid Google Maps key.
+const NOMINATIM_MIN_INTERVAL_MS = 1100;
+
+async function geocodeOneViaNominatim(a) {
+  const q = encodeURIComponent(`${a.address}, ${a.city}, ${a.state || 'MI'} ${a.zip || ''}`);
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${q}`);
+  if (!res.ok) throw new Error(`Nominatim returned ${res.status}`);
+  const results = await res.json();
+  if (!results.length) return null;
+  return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+}
+
+async function retryUnmappedViaOsm() {
+  const btn = document.getElementById('unmapped-retry-osm');
+  const statusEl = document.getElementById('unmapped-retry-status');
+  const targets = unmappedAccounts();
+  if (!targets.length) return;
+
+  btn.disabled = true;
+  let matched = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const a = targets[i];
+    statusEl.textContent = `Checking ${i + 1} of ${targets.length} via OpenStreetMap (about 1/sec, please wait)...`;
+    const t0 = performance.now();
+    try {
+      const coords = await geocodeOneViaNominatim(a);
+      if (coords) {
+        await db.putAccounts([{ ...a, lat: coords.lat, lon: coords.lon, geocodeStatus: 'ok' }]);
+        matched++;
+      }
+    } catch (err) {
+      statusEl.textContent = `Stopped early: ${err.message}. ${matched} of ${i} checked were matched so far.`;
+      await loadAll();
+      render();
+      openUnmappedModal();
+      btn.disabled = false;
+      return;
+    }
+    // Policy-required throttle -- skip the wait after the very last request.
+    const elapsed = performance.now() - t0;
+    if (i < targets.length - 1 && elapsed < NOMINATIM_MIN_INTERVAL_MS) {
+      await new Promise((r) => setTimeout(r, NOMINATIM_MIN_INTERVAL_MS - elapsed));
+    }
+  }
+
+  await loadAll();
+  render();
+  openUnmappedModal();
+  statusEl.textContent = `Matched ${matched} of ${targets.length} via OpenStreetMap.`;
+  btn.disabled = false;
+}
+
 function openReviewModal() {
   const list = document.getElementById('review-list');
   const pending = window.__pendingReview || [];
@@ -505,6 +563,7 @@ async function main() {
   document.getElementById('unmapped-export').addEventListener('click', () => {
     exportFilteredAccounts(unmappedAccounts(), brandsById(), 'account-atlas-unmapped.csv');
   });
+  document.getElementById('unmapped-retry-osm').addEventListener('click', retryUnmappedViaOsm);
 
   document.getElementById('clear-all-btn').addEventListener('click', async () => {
     const total = state.accounts.length;
