@@ -12,10 +12,19 @@ const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7
 // deploy) -- his work computer's network silently blocked that domain
 // ("Failed to fetch", no reachable error detail). Switched to a Cloudflare
 // Pages Function (functions/api/geocode.js, same relay logic) served from
-// this SAME origin -- since the app itself already loads at work, the
-// geocode call now rides that same allowed domain instead of a separate,
-// unfamiliar one.
-const GEOCODE_RELAY_URL = '/api/geocode';
+// the SAME origin as accountatlas.pages.dev -- rides that already-allowed
+// domain at work instead of a separate, unfamiliar one.
+//
+// Andrew, 2026-08-21 (same day, second bug): that same-origin path only
+// exists on Cloudflare Pages -- GitHub Pages (the separate public,
+// no-login deploy used purely to hand the app to colleagues, see
+// andrewmonroe-dev.github.io/AccountAtlas/) is a plain static host with
+// no server-side functions at all, so /api/geocode 404s there. Resolve
+// the relay by hostname instead of hardcoding one: the Pages Function on
+// Cloudflare's own domain, the standalone Worker everywhere else.
+const GEOCODE_RELAY_URL = location.hostname.endsWith('.pages.dev')
+  ? '/api/geocode'
+  : 'https://atlasviewer.vesvelid.workers.dev';
 
 const state = {
   brands: [],           // [{id, name, color}]
