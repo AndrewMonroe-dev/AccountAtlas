@@ -149,6 +149,20 @@ function hideDetailPanel() {
   detailPanel.hidden = true;
 }
 
+// Andrew, 2026-08-21: tap-to-navigate, asked for once the mobile layout
+// made it realistic someone would actually be standing near their phone
+// wanting directions. Apple Maps' web link (maps.apple.com) only reliably
+// opens the native app from Safari/iOS -- everywhere else (Android,
+// desktop) it either fails or just shows a web preview, so this branches
+// on a real iOS user-agent check rather than always using one link. Google
+// Maps' `?api=1` search link is the documented universal form: opens the
+// native app on Android, falls back to the web app anywhere else.
+export function mapsUrlFor(acct) {
+  const q = encodeURIComponent(`${acct.address}, ${acct.city}, ${acct.state || 'MI'} ${acct.zip || ''}`);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  return isIOS ? `https://maps.apple.com/?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
 function detailHtml(acct, brand) {
   const soldSkus = Object.entries(acct.skus).filter(([, v]) => v).map(([k]) => k);
   const unsoldSkus = Object.entries(acct.skus).filter(([, v]) => !v).map(([k]) => k);
@@ -156,7 +170,7 @@ function detailHtml(acct, brand) {
   return `
     <div class="map-popup">
       <div class="pname">${escapeHtml(acct.storeName)}</div>
-      <div class="paddr">${escapeHtml(acct.county || '')} County &middot; ${escapeHtml(acct.address)}, ${escapeHtml(acct.city)}</div>
+      <a class="paddr" href="${mapsUrlFor(acct)}" target="_blank" rel="noopener" title="Open in Maps">${escapeHtml(acct.county || '')} County &middot; ${escapeHtml(acct.address)}, ${escapeHtml(acct.city)}</a>
       <div class="fam">${escapeHtml(brand ? brand.name : '')} &mdash; sold (${soldSkus.length})</div>
       <div class="chip-row">${soldSkus.length ? soldSkus.map((s) => chip(s, '')).join('') : '<span class="chip-empty">none</span>'}</div>
       <div class="fam">${escapeHtml(brand ? brand.name : '')} &mdash; unsold (${unsoldSkus.length})</div>

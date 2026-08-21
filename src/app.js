@@ -1,9 +1,9 @@
-import * as db from './core/db.js?v=20260817b';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20260817b';
-import { buildMatches } from './data/matcher.js?v=20260817b';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20260817b';
-import { exportBrandSnapshot, parseSnapshotFile } from './data/snapshot.js?v=20260817b';
-import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './modules/mapView.js?v=20260817b';
+import * as db from './core/db.js?v=20260821';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20260821';
+import { buildMatches } from './data/matcher.js?v=20260821';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20260821';
+import { exportBrandSnapshot, parseSnapshotFile } from './data/snapshot.js?v=20260821';
+import { initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor } from './modules/mapView.js?v=20260821';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -421,7 +421,7 @@ function openUnmappedModal() {
       return `
         <div class="review-row">
           <div><strong>${escapeHtml(a.storeName)}</strong> (${escapeHtml(brand ? brand.name : '')})</div>
-          <div class="hint">${escapeHtml(a.address)}, ${escapeHtml(a.city)}, ${escapeHtml(a.state)} ${escapeHtml(a.zip)}</div>
+          <a class="hint" href="${mapsUrlFor(a)}" target="_blank" rel="noopener" title="Open in Maps -- worth a try even though our geocoder couldn't match it">${escapeHtml(a.address)}, ${escapeHtml(a.city)}, ${escapeHtml(a.state)} ${escapeHtml(a.zip)}</a>
           <div class="chip ${statusClass}" style="width:fit-content">${statusLabel}</div>
         </div>`;
     }).join('');
@@ -532,6 +532,25 @@ async function main() {
   await loadAll();
   await recomputeMatches();
   render();
+
+  // Andrew, 2026-08-21: mobile-only off-canvas sidebar (see app.css's
+  // max-width:820px block) -- toggle button opens/closes it, tapping the
+  // backdrop closes it. No-op on desktop since the button is display:none
+  // there, but the listeners are harmless either way.
+  const sidebarEl = document.getElementById('sidebar');
+  const backdropEl = document.getElementById('sidebar-backdrop');
+  function closeSidebar() {
+    sidebarEl.classList.remove('open');
+    backdropEl.classList.remove('open');
+    backdropEl.hidden = true;
+  }
+  document.getElementById('sidebar-toggle').addEventListener('click', () => {
+    const opening = !sidebarEl.classList.contains('open');
+    sidebarEl.classList.toggle('open', opening);
+    backdropEl.classList.toggle('open', opening);
+    backdropEl.hidden = !opening;
+  });
+  backdropEl.addEventListener('click', closeSidebar);
 
   document.getElementById('add-brand-btn').addEventListener('click', openUploadModal);
   document.getElementById('import-snapshot-btn').addEventListener('click', importSnapshot);

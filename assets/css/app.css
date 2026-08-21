@@ -127,3 +127,57 @@ button, input, select { font: inherit; color: inherit; }
 .review-actions button { flex: 1; border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 6px; font-size: 12px; cursor: pointer; }
 .review-actions button.confirm:hover { border-color: var(--sold); color: var(--sold); }
 .review-actions button.reject:hover { border-color: var(--unsold); color: var(--unsold); }
+
+.sidebar-toggle-btn {
+  display: none; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink);
+  border-radius: 7px; width: 34px; height: 34px; font-size: 16px; cursor: pointer; flex: none;
+}
+.sidebar-backdrop { display: none; }
+
+/* Andrew, 2026-08-21: below this width the fixed 320px sidebar (see .main
+   above) would leave the actual map only a sliver wide -- confirmed
+   unusable on a real phone screen when Andrew asked whether a colleague
+   could use this on their phone. Sidebar becomes an off-canvas drawer
+   (hidden by default, slides in over the map) instead of a permanent
+   column; the map fills the full width underneath it either way. */
+@media (max-width: 820px) {
+  .sidebar-toggle-btn { display: flex; align-items: center; justify-content: center; }
+  .wordmark .place { display: none; } /* reclaim topbar width for the toggle + search on a narrow screen */
+  /* min-width:0 is the real fix here, not the width reset above --
+     flex items default to min-width:auto, which refuses to shrink below
+     the input's own intrinsic content width (~170px+) and was forcing
+     the whole topbar, and with it the page's layout viewport, wider than
+     the phone's actual 390px-ish screen (confirmed live: window.innerWidth
+     was reporting 469 instead of 390 with this missing). */
+  /* min-width:0 on every link in this flex/grid chain -- .app (grid),
+     .topbar (flex), and .spacer/.search (flex items) all default to
+     min-width:auto, which at each level refuses to shrink below its own
+     content's natural minimum. Missing it at ANY link was enough to force
+     the whole page's layout viewport wider than the phone's real screen
+     (confirmed live via window.innerWidth). .spacer also stops competing
+     for space on mobile -- its only job is pushing search rightward when
+     there's room to spare, which isn't true here. */
+  .app, .topbar { min-width: 0; }
+  .topbar { gap: 10px; padding: 0 12px; }
+  .wordmark { min-width: 0; }
+  .spacer { flex: 0 1 0%; min-width: 0; }
+  .search { width: auto; flex: 1 1 auto; min-width: 0; max-width: none; }
+  .search input { min-width: 0; }
+
+  .main { display: block; position: relative; height: 100%; }
+  .sidebar {
+    position: absolute; top: 0; bottom: 0; left: 0; width: min(320px, 88vw);
+    z-index: 900; transform: translateX(-100%); transition: transform .22s ease;
+    box-shadow: var(--shadow);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop.open {
+    display: block; position: absolute; inset: 0; z-index: 800;
+    background: rgba(10,15,12,0.45);
+  }
+  .map-pane { position: absolute; inset: 0; }
+}
+
+/* Always, not just mobile -- a 300px fixed-width absolute panel can run
+   off the edge of a genuinely narrow phone screen either way. */
+.detail-panel { width: min(300px, 92vw); }
