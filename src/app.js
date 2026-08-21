@@ -7,10 +7,15 @@ import { initMap, renderChoropleth, renderPins, flyToCounty, getMap } from './mo
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
-// Cloudflare Worker relay in front of the Census batch geocoder (see
-// tools/cloudflare-worker.js) -- lets the Geocode button work from any
-// browser, on any computer, with no local server and no install.
-const GEOCODE_RELAY_URL = 'https://atlasviewer.vesvelid.workers.dev';
+// Andrew, 2026-08-21: was a separate `atlasviewer.vesvelid.workers.dev`
+// Cloudflare Worker (tools/cloudflare-worker.js, kept as reference/backup
+// deploy) -- his work computer's network silently blocked that domain
+// ("Failed to fetch", no reachable error detail). Switched to a Cloudflare
+// Pages Function (functions/api/geocode.js, same relay logic) served from
+// this SAME origin -- since the app itself already loads at work, the
+// geocode call now rides that same allowed domain instead of a separate,
+// unfamiliar one.
+const GEOCODE_RELAY_URL = '/api/geocode';
 
 const state = {
   brands: [],           // [{id, name, color}]
