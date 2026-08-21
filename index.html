@@ -42,8 +42,19 @@
         <div class="section-label">Compare mode</div>
         <div class="segmented" id="compare-segmented">
           <button data-mode="overlay" class="active">Overlay</button>
-          <button data-mode="gap">Gap view</button>
         </div>
+        <!-- Andrew, 2026-08-21: Gap view (cross-brand address matching, see
+             visibleAccounts()'s 'gap' branch in app.js) removed from the UI
+             -- it compares two separate brand files by matched address,
+             which falls apart the moment one brand's list is small/new
+             (the exact "not sold anywhere yet" case this was built for).
+             Every account's pin ALREADY renders solid (sold) vs hollow
+             (not yet) within Overlay mode based on its own skus data (see
+             renderPins in mapView.js) -- toggle on just the one brand you
+             care about and the legend below already shows the split. Code
+             kept in app.js, unused, in case a real two-brand comparison is
+             wanted later. -->
+        <div class="hint">Toggle on one brand at a time to see its own sold vs. not-yet-sold split -- solid pins are sold, hollow pins aren't (see Legend below).</div>
         <div class="gap-form" id="gap-form" style="display:none">
           <div class="row"><span style="color:var(--ink-dim)">Has</span><select id="gap-has"></select></div>
           <div class="row"><span class="arrow">&rarr; missing</span><select id="gap-missing"></select></div>
