@@ -1,9 +1,9 @@
-import * as db from './core/db.js?v=20260821';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20260821';
-import { buildMatches } from './data/matcher.js?v=20260821';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20260821';
-import { exportBrandSnapshot, parseSnapshotFile } from './data/snapshot.js?v=20260821';
-import { initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor } from './modules/mapView.js?v=20260821';
+import * as db from './core/db.js?v=20260909';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20260909';
+import { buildMatches } from './data/matcher.js?v=20260909';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20260909';
+import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20260909';
+import { initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor } from './modules/mapView.js?v=20260909';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -121,6 +121,7 @@ function renderBrandList() {
       </div>
       <button class="icon-btn geocode-btn" title="Geocode this brand's accounts" data-action="geocode" data-id="${b.id}">&#128205;</button>
       <button class="icon-btn" title="Export a portable snapshot (data + coordinates) to move to another computer" data-action="export-snapshot" data-id="${b.id}">&#128190;</button>
+      <button class="icon-btn" title="Export a standalone map viewer -- one HTML file, no login/install needed, safe to send to anyone" data-action="export-viewer" data-id="${b.id}">&#128506;</button>
       <button class="toggle ${state.activeBrandIds.has(b.id) ? 'on' : ''}" data-action="toggle-brand" data-id="${b.id}"></button>
     `;
     el.appendChild(row);
@@ -141,6 +142,23 @@ function renderBrandList() {
       const brand = state.brands.find((b) => b.id === btn.dataset.id);
       const accts = state.accounts.filter((a) => a.brandId === brand.id);
       exportBrandSnapshot(brand, accts);
+    });
+  });
+  el.querySelectorAll('[data-action="export-viewer"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const brand = state.brands.find((b) => b.id === btn.dataset.id);
+      const accts = state.accounts.filter((a) => a.brandId === brand.id);
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        await exportStandaloneViewer(brand, accts);
+      } catch (err) {
+        alert(`Couldn't build the standalone viewer: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
     });
   });
 
