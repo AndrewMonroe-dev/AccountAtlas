@@ -22,19 +22,53 @@ export function exportBrandSnapshot(brand, accounts) {
 }
 
 // Standalone viewer: one self-contained .html file with a brand's map +
-// data baked directly in (Leaflet/MarkerCluster still load from their own
-// CDN, everything else inline). No server, no Cloudflare Access login, no
-// Account Atlas install -- open it in any browser, on any computer,
-// including one you don't control. Meant for sharing with someone who
-// isn't (and won't be) an Access-allowed user, as an addition alongside
-// the JSON snapshot above, not a replacement for it -- the JSON snapshot
-// stays the format for moving data between your own computers/back into
-// the real app; this is a save-and-reopen-anywhere leave-behind. Andrew
-// can save the downloaded file and reopen it again later exactly like any
-// other file on disk.
+// data baked directly in, INCLUDING the Leaflet/MarkerCluster library code
+// itself (not just linked from CDN). No server, no Cloudflare Access
+// login, no Account Atlas install -- open it in any browser, on any
+// computer, including one you don't control. Meant for sharing with
+// someone who isn't (and won't be) an Access-allowed user, as an addition
+// alongside the JSON snapshot above, not a replacement for it -- the JSON
+// snapshot stays the format for moving data between your own computers/
+// back into the real app; this is a save-and-reopen-anywhere leave-behind.
+// Andrew can save the downloaded file and reopen it again later exactly
+// like any other file on disk.
+//
+// Andrew, 2026-09-09: first version linked Leaflet/MarkerCluster from
+// their CDN via <script src>, same as the main app -- worked fine on a
+// computer but showed a blank map on his phone. Traced to how he actually
+// opens the file there: tapping it straight in Files/Mail/Messages opens
+// a lightweight in-app preview, not a real browser tab, and those
+// previews commonly block loading external scripts even when the page's
+// own inline content and CSS render fine (matches exactly what he saw --
+// title and legend showed, map area didn't). Fetching the library source
+// itself at export time and inlining it as a <script> block (rather than
+// a src= reference) removes that dependency entirely -- the only thing
+// left needing a live network request is the OpenStreetMap tile images,
+// which is a plain image load, not script execution, and far less likely
+// to be blocked by a constrained preview context.
+const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+const LEAFLET_JS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+const CLUSTER_CSS_URL = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';
+const CLUSTER_DEFAULT_CSS_URL = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css';
+const CLUSTER_JS_URL = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';
+
+async function fetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Couldn't fetch ${url} (${res.status})`);
+  return res.text();
+}
+
 export async function exportStandaloneViewer(brand, accounts) {
   const geoRes = await fetch('data/geo/michigan-counties.geojson');
   const countyGeoJson = await geoRes.json();
+
+  const [leafletCss, leafletJs, clusterCss, clusterDefaultCss, clusterJs] = await Promise.all([
+    fetchText(LEAFLET_CSS_URL),
+    fetchText(LEAFLET_JS_URL),
+    fetchText(CLUSTER_CSS_URL),
+    fetchText(CLUSTER_DEFAULT_CSS_URL),
+    fetchText(CLUSTER_JS_URL),
+  ]);
 
   const mapped = accounts.filter((a) => a.lat !== null && a.lon !== null);
   const soldCount = accounts.filter((a) => Object.values(a.skus).some(Boolean)).length;
@@ -50,7 +84,7 @@ export async function exportStandaloneViewer(brand, accounts) {
     exportedAt: new Date().toISOString(),
   };
 
-  const html = buildViewerHtml(brand.name, payload);
+  const html = buildViewerHtml(brand.name, payload, { leafletCss, leafletJs, clusterCss, clusterDefaultCss, clusterJs });
   const blob = new Blob([html], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -66,18 +100,22 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function buildViewerHtml(brandName, payload) {
+function buildViewerHtml(brandName, payload, libs) {
   const dataJson = JSON.stringify(payload).replace(/</g, '\\u003c');
   const title = `${brandName} — Account Atlas (saved view)`;
+  // Libraries are inlined (not linked to their CDN) so the map still works
+  // when this file is opened in a phone's in-app preview -- see the note
+  // on exportStandaloneViewer above. Only the OpenStreetMap tile images
+  // still come from a live network request.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>${libs.leafletCss}</style>
+<style>${libs.clusterCss}</style>
+<style>${libs.clusterDefaultCss}</style>
 <style>
 :root {
   --bg: #eef1ee; --panel: #ffffff; --panel-2: #e4e8e3; --line: #ccd3cc;
@@ -157,8 +195,8 @@ html, body { margin: 0; height: 100%; font-family: -apple-system, Segoe UI, Robo
     </aside>
   </div>
 </div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>${libs.leafletJs}</script>
+<script>${libs.clusterJs}</script>
 <script>
 const DATA = ${dataJson};
 
