@@ -99,7 +99,15 @@ function buildViewerHtml(brandName, payload) {
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); }
-.app { display: flex; flex-direction: column; height: 100%; }
+/* height:100vh (not 100%) deliberately -- anchors straight to the real
+   viewport instead of depending on an unbroken height:100% chain through
+   html/body, which reliably breaks when this file is opened in a phone's
+   in-app file preview (Files/Mail/Messages) rather than a full browser tab.
+   Confirmed live: without this, the map's flex:1 container collapses to
+   zero height on a phone -- topbar and legend still render (they don't
+   need a real height), the map area just goes blank. Matches the app's
+   own main index.html, which uses the same 100vh pattern. */
+.app { display: flex; flex-direction: column; height: 100vh; min-height: 480px; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
 .topbar .name { font-weight: 700; font-size: 15px; }
 .topbar .sub { font-size: 12px; color: var(--ink-dim); }
