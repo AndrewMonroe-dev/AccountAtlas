@@ -1,15 +1,15 @@
-import * as db from './core/db.js?v=20261021d';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021d';
-import { buildMatches } from './data/matcher.js?v=20261021d';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021d';
-import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021d';
+import * as db from './core/db.js?v=20261021e';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021e';
+import { buildMatches } from './data/matcher.js?v=20261021e';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021e';
+import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021e';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount,
-} from './modules/mapView.js?v=20261021d';
+} from './modules/mapView.js?v=20261021e';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, loadRoute, saveRoute,
-} from './modules/route.js?v=20261021d';
+} from './modules/route.js?v=20261021e';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -332,7 +332,7 @@ function renderNearList() {
     <div class="near-row">
       <div class="near-info" data-focus="${escapeHtml(String(acct.id))}">
         <div class="near-name">${escapeHtml(acct.storeName)}</div>
-        <div class="near-sub">${escapeHtml(acct.city)} &middot; ${miles.toFixed(1)} mi</div>
+        <div class="near-sub">${escapeHtml(acct.city)} &middot; ${miles.toFixed(1)} mi &middot; ${Object.values(acct.skus).some(Boolean) ? 'sold' : 'unsold'}</div>
       </div>
       <button data-add="${escapeHtml(String(acct.id))}" ${routePositionOf(acct.id) ? 'disabled' : ''}>${routePositionOf(acct.id) ? 'Stop ' + routePositionOf(acct.id) : '+ Route'}</button>
     </div>`).join('');
@@ -362,12 +362,12 @@ async function showNearMe() {
   }
   showUserLocation(here.lat, here.lon);
   nearRows = visibleAccounts()
-    .filter((a) => a.lat !== null && a.lon !== null && !Object.values(a.skus).some(Boolean))
+    .filter((a) => a.lat !== null && a.lon !== null)
     .map((acct) => ({ acct, miles: haversineMiles(here, { lat: acct.lat, lon: acct.lon }) }))
     .sort((x, y) => x.miles - y.miles)
     .slice(0, 10);
   if (!nearRows.length) {
-    list.innerHTML = '<div class="near-msg">No unsold accounts with a map point in the current view.</div>';
+    list.innerHTML = '<div class="near-msg">No accounts with a map point in the current view.</div>';
     return;
   }
   renderNearList();
