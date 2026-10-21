@@ -84,12 +84,18 @@ export function pathMiles(points, order, start) {
 
 // Google Maps directions link. No origin on purpose: Maps then starts from
 // wherever the phone is standing when the link is opened.
+//
+// Stops are sent as "lat,lon", not address text: Maps matches text against
+// its own place database and answered "can't seem to find that place" for
+// the addresses typed into the source spreadsheets (reported 2026-10-21).
+// Coordinates can't be misread, and every stop on a route is already mapped.
 export function googleRouteUrl(stops) {
   if (!stops.length) return null;
   const enc = encodeURIComponent;
+  const point = (s) => enc(`${s.lat.toFixed(6)},${s.lon.toFixed(6)}`);
   const last = stops[stops.length - 1];
-  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${enc(last.query)}`;
-  const waypoints = stops.slice(0, -1).map((s) => enc(s.query));
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${point(last)}`;
+  const waypoints = stops.slice(0, -1).map(point);
   if (waypoints.length) url += `&waypoints=${waypoints.join('%7C')}`;
   return url;
 }
