@@ -1,15 +1,15 @@
-import * as db from './core/db.js?v=20261021g';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021g';
-import { buildMatches } from './data/matcher.js?v=20261021g';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021g';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021g';
+import * as db from './core/db.js?v=20261021h';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021h';
+import { buildMatches } from './data/matcher.js?v=20261021h';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021h';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021h';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount,
-} from './modules/mapView.js?v=20261021g';
+} from './modules/mapView.js?v=20261021h';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, loadRoute, saveRoute,
-} from './modules/route.js?v=20261021g';
+} from './modules/route.js?v=20261021h';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 

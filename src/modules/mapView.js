@@ -54,6 +54,15 @@ export async function initMap(containerId, { onCountyClickFn, onRouteToggleFn, r
 
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
+  // Tapping bare map (outside every county shape, e.g. water) closes the store
+  // panel. Pins, route badges and county shapes stop their own clicks from
+  // reaching here, so opening a store is never undone by the same tap.
+  map.on('click', (e) => {
+    const hit = nearestPin(e.containerPoint);
+    if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
+    hideDetailPanel();
+  });
+
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap contributors',
@@ -109,9 +118,13 @@ export function renderChoropleth(countyStats) {
       // Fat-finger friendly: a click that just misses a pin lands on the county
       // underneath. If a visible pin is within reach, open it instead of
       // treating the click as "navigate to this county".
+      // With the store panel open, a tap on empty county space only closes it
+      // (no zoom to the county in the same tap).
       layer.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
         const hit = nearestPin(e.containerPoint);
         if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
+        if (detailPanel && !detailPanel.hidden) { hideDetailPanel(); return; }
         if (onCountyClick) onCountyClick(name);
       });
       layer.on('mouseover', () => layer.setStyle({ weight: 2 }));
@@ -149,7 +162,10 @@ export function renderPins(accounts, brandsById) {
       className: sold ? 'pin-sold-glow' : 'pin-unsold',
     });
     marker.on('mouseover', () => showDetailPanel(acct, brand));
-    marker.on('click', () => showDetailPanel(acct, brand, { pin: true }));
+    marker.on('click', (e) => {
+      L.DomEvent.stopPropagation(e);
+      showDetailPanel(acct, brand, { pin: true });
+    });
     clusterGroup.addLayer(marker);
     pinEntries.push({ marker, acct, brand });
   });
@@ -233,7 +249,8 @@ export function renderRouteStops(stops) {
       className: 'route-badge', html: `<span>${i + 1}</span>`, iconSize: [26, 26], iconAnchor: [13, 13],
     });
     const badge = L.marker([s.lat, s.lon], { icon, zIndexOffset: 1000, title: s.name });
-    badge.on('click', () => {
+    badge.on('click', (e) => {
+      L.DomEvent.stopPropagation(e);
       const entry = pinEntries.find((p) => p.acct.id === s.id);
       if (entry) showDetailPanel(entry.acct, entry.brand, { pin: true });
     });
