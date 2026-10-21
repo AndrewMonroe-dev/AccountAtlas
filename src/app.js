@@ -1,15 +1,15 @@
-import * as db from './core/db.js?v=20261021e';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021e';
-import { buildMatches } from './data/matcher.js?v=20261021e';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021e';
-import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021e';
+import * as db from './core/db.js?v=20261021g';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021g';
+import { buildMatches } from './data/matcher.js?v=20261021g';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021g';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021g';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount,
-} from './modules/mapView.js?v=20261021e';
+} from './modules/mapView.js?v=20261021g';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, loadRoute, saveRoute,
-} from './modules/route.js?v=20261021e';
+} from './modules/route.js?v=20261021g';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -49,13 +49,39 @@ function brandsById() {
   return map;
 }
 
+// Which lists (brands) are switched off is remembered between launches. The
+// OFF set is what is stored, so a list added later defaults to on.
+const OFF_LISTS_KEY = 'aa-lists-off-v1';
+let offBrandIds = loadOffLists();
+
+function loadOffLists() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(OFF_LISTS_KEY) || '[]');
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveOffLists() {
+  try { localStorage.setItem(OFF_LISTS_KEY, JSON.stringify([...offBrandIds])); } catch { /* storage blocked */ }
+}
+
+function syncActiveBrands() {
+  state.activeBrandIds = new Set(state.brands.filter((b) => !offBrandIds.has(b.id)).map((b) => b.id));
+}
+
+function setBrandActive(id, on) {
+  if (on) offBrandIds.delete(id); else offBrandIds.add(id);
+  saveOffLists();
+  syncActiveBrands();
+}
+
 async function loadAll() {
   state.brands = await db.getAllBrands();
   state.accounts = await db.getAllAccounts();
   state.matchGroups = await db.getAllMatchGroups();
-  if (state.activeBrandIds.size === 0) {
-    state.brands.forEach((b) => state.activeBrandIds.add(b.id));
-  }
+  syncActiveBrands();
 }
 
 function visibleAccounts() {
@@ -102,6 +128,7 @@ function countyStatsFor(accounts) {
 
 function render() {
   renderBrandList();
+  renderListChips();
   renderGapForm();
   renderFilters();
   renderStats();
@@ -136,7 +163,7 @@ function renderBrandList() {
   el.querySelectorAll('[data-action="toggle-brand"]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.id;
-      if (state.activeBrandIds.has(id)) state.activeBrandIds.delete(id); else state.activeBrandIds.add(id);
+      setBrandActive(id, !state.activeBrandIds.has(id));
       render();
     });
   });
@@ -179,6 +206,40 @@ function renderBrandList() {
     gapHasSel.value = state.gapHas;
     gapMissingSel.value = state.gapMissing;
   }
+}
+
+// Chip bar above the map: one tap switches a list on or off, any combination.
+// Hidden with fewer than two lists, since there is nothing to choose between.
+function renderListChips() {
+  const bar = document.getElementById('list-chips');
+  const wasHidden = bar.hidden;
+  bar.hidden = state.brands.length < 2;
+  // The bar takes its own row above the map, so the map has to re-measure
+  // whenever the bar appears or disappears -- after the chips are in it, not
+  // before, or it measures the still-empty bar.
+  const remeasure = () => { if (wasHidden !== bar.hidden && getMap()) getMap().invalidateSize(); };
+  if (bar.hidden) { remeasure(); return; }
+  const chips = state.brands.map((b) => {
+    const total = state.accounts.filter((a) => a.brandId === b.id).length;
+    const on = state.activeBrandIds.has(b.id);
+    return `<button class="list-chip${on ? ' on' : ''}" data-id="${escapeHtml(String(b.id))}" aria-pressed="${on}" style="--chip-color:${escapeHtml(b.color)}">`
+      + `<span class="chip-dot"></span><span class="chip-name">${escapeHtml(b.name)}</span><span class="chip-count">${total}</span></button>`;
+  });
+  const allOn = state.brands.every((b) => state.activeBrandIds.has(b.id));
+  bar.innerHTML = `<button class="list-chip all${allOn ? ' on' : ''}" data-all="1">All</button>` + chips.join('');
+  bar.querySelectorAll('.list-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      if (chip.dataset.all) {
+        state.brands.forEach((b) => offBrandIds.delete(b.id));
+        saveOffLists();
+        syncActiveBrands();
+      } else {
+        setBrandActive(chip.dataset.id, !state.activeBrandIds.has(chip.dataset.id));
+      }
+      render();
+    });
+  });
+  remeasure();
 }
 
 function renderGapForm() {
@@ -436,54 +497,83 @@ async function handleUpload() {
     closeUploadModal();
   }
 
+  offBrandIds.delete(brandId);
+  saveOffLists();
   await loadAll();
-  state.activeBrandIds.add(brandId);
   await recomputeMatches();
   render();
 }
 
 // ---------------------------------------------------------------
-// Snapshot import -- brings in a brand's full data (including already-
-// resolved coordinates) exported from another computer. No Excel, no
-// geocoding, no Node needed on the machine doing the importing.
+// Snapshot import -- brings in one or many lists (including already-
+// resolved coordinates) from single-list snapshot files and/or an
+// all-lists backup. No Excel, no geocoding, no Node needed on the machine
+// doing the importing. Several files can be picked at once.
 // ---------------------------------------------------------------
 
 function importSnapshot() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.json';
+  input.accept = '.json,application/json';
+  input.multiple = true;
   input.addEventListener('change', async () => {
-    const file = input.files[0];
-    if (!file) return;
+    const files = [...input.files];
+    if (!files.length) return;
 
-    let parsed;
-    try {
-      parsed = await parseSnapshotFile(file);
-    } catch (err) {
-      alert('Could not import: ' + err.message);
+    // Parse everything first. A bad file is reported and skipped, the rest still import.
+    // A list name appearing twice in the batch keeps the last one.
+    const incoming = new Map();
+    const problems = [];
+    for (const file of files) {
+      try {
+        (await parseSnapshotFile(file)).forEach((list) => incoming.set(list.brand.name.toLowerCase(), list));
+      } catch (err) {
+        problems.push(`${file.name}: ${err.message}`);
+      }
+    }
+    const lists = [...incoming.values()];
+    if (!lists.length) {
+      alert('Could not import anything.\n' + problems.join('\n'));
       return;
     }
 
-    const incomingBrand = parsed.brand;
-    const existing = state.brands.find((b) => b.name.toLowerCase() === incomingBrand.name.toLowerCase());
-    if (existing) {
-      const ok = confirm(`"${incomingBrand.name}" already exists (${state.accounts.filter((a) => a.brandId === existing.id).length} accounts). Replace it with this snapshot?`);
-      if (!ok) return;
-      await db.deleteBrand(existing.id);
+    const findExisting = (list) => state.brands.find((b) => b.name.toLowerCase() === list.brand.name.toLowerCase());
+    const clashes = lists.filter(findExisting);
+    let replaceClashes = false;
+    if (clashes.length) {
+      replaceClashes = confirm(
+        `${clashes.length} of these lists already exist: ${clashes.map((l) => l.brand.name).join(', ')}.\n\n` +
+        'OK replaces them with the imported copies. Cancel keeps your current copies and imports only the new lists.'
+      );
     }
 
-    const brandId = existing ? existing.id : (incomingBrand.id || crypto.randomUUID());
-    const color = existing ? existing.color : BRAND_COLORS[state.brands.length % BRAND_COLORS.length];
-    await db.putBrand({ ...incomingBrand, id: brandId, color });
-    await db.putAccounts(parsed.accounts.map((a) => ({ ...a, brandId })));
+    const done = [];
+    const skipped = [];
+    const freshBrandIds = [];
+    for (const list of lists) {
+      const existing = findExisting(list);
+      if (existing && !replaceClashes) { skipped.push(list.brand.name); continue; }
+      if (existing) await db.deleteBrand(existing.id);
+
+      const brandId = existing ? existing.id : (list.brand.id || crypto.randomUUID());
+      const color = existing ? existing.color : BRAND_COLORS[(state.brands.length + freshBrandIds.length) % BRAND_COLORS.length];
+      await db.putBrand({ ...list.brand, id: brandId, color });
+      await db.putAccounts(list.accounts.map((a) => ({ ...a, brandId })));
+      offBrandIds.delete(brandId);
+      freshBrandIds.push(brandId);
+      done.push(`${list.brand.name} (${list.accounts.length} accounts, ${list.accounts.filter((a) => a.lat !== null && a.lon !== null).length} mapped)`);
+    }
+    saveOffLists();
 
     await loadAll();
-    state.activeBrandIds.add(brandId);
     await recomputeMatches();
     render();
 
-    const mapped = parsed.accounts.filter((a) => a.lat !== null && a.lon !== null).length;
-    alert(`Imported "${incomingBrand.name}": ${parsed.accounts.length} accounts, ${mapped} already mapped.`);
+    alert(
+      (done.length ? `Imported ${done.length} list${done.length === 1 ? '' : 's'}:\n${done.join('\n')}` : 'Nothing was imported.') +
+      (skipped.length ? `\n\nKept your current copy of: ${skipped.join(', ')}` : '') +
+      (problems.length ? `\n\nCould not read:\n${problems.join('\n')}` : '')
+    );
   });
   input.click();
 }
@@ -722,6 +812,12 @@ async function main() {
     routePositionFn: routePositionOf,
   });
   await loadAll();
+  // A launch with every list remembered as off would open to a blank map.
+  if (state.brands.length && state.activeBrandIds.size === 0) {
+    offBrandIds.clear();
+    saveOffLists();
+    syncActiveBrands();
+  }
   await recomputeMatches();
   render();
   renderRouteBar();
@@ -758,6 +854,10 @@ async function main() {
 
   document.getElementById('add-brand-btn').addEventListener('click', openUploadModal);
   document.getElementById('import-snapshot-btn').addEventListener('click', importSnapshot);
+  document.getElementById('backup-all-btn').addEventListener('click', () => {
+    if (!state.brands.length) { alert('There are no lists to back up yet.'); return; }
+    exportAllLists(state.brands, state.accounts);
+  });
   document.getElementById('upload-cancel').addEventListener('click', closeUploadModal);
   document.getElementById('upload-submit').addEventListener('click', handleUpload);
 

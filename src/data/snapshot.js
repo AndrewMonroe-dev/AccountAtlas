@@ -305,8 +305,9 @@ countyLayer.on('click', function (e) {
 </html>`;
 }
 
-// Returns { brand, accounts }. Throws if the file isn't a recognizable
-// snapshot.
+// Returns an array of { brand, accounts }: one entry for a single-list
+// snapshot, several for an all-lists backup. Throws if the file isn't a
+// recognizable Account Atlas file.
 export async function parseSnapshotFile(file) {
   const text = await file.text();
   let data;
@@ -315,8 +316,34 @@ export async function parseSnapshotFile(file) {
   } catch {
     throw new Error('Not a valid JSON file.');
   }
-  if (!data.brand || !Array.isArray(data.accounts)) {
-    throw new Error('This file doesn\'t look like an Account Atlas brand snapshot.');
+  if (Array.isArray(data.lists)) {
+    const lists = data.lists.filter((l) => l && l.brand && l.brand.name && Array.isArray(l.accounts));
+    if (!lists.length) throw new Error('This backup file has no lists in it.');
+    return lists.map((l) => ({ brand: l.brand, accounts: l.accounts }));
   }
-  return { brand: data.brand, accounts: data.accounts };
+  if (!data.brand || !Array.isArray(data.accounts)) {
+    throw new Error('This file doesn\'t look like an Account Atlas snapshot or backup.');
+  }
+  return [{ brand: data.brand, accounts: data.accounts }];
+}
+
+// One file holding every list (brands plus all their accounts with resolved
+// coordinates), so a phone's whole setup can be saved or moved in one go.
+// Import it back through the same Import button as a single snapshot.
+export function exportAllLists(brands, accounts) {
+  const backup = {
+    formatVersion: 2,
+    exportedAt: new Date().toISOString(),
+    lists: brands.map((brand) => ({
+      brand,
+      accounts: accounts.filter((a) => a.brandId === brand.id),
+    })),
+  };
+  const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `account-atlas-all-lists-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

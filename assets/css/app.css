@@ -88,8 +88,30 @@ button, input, select { font: inherit; color: inherit; }
 .legend-row .dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
 .legend-swatch { width: 22px; height: 8px; border-radius: 3px; flex: none; }
 
-.map-pane { position: relative; overflow: hidden; }
-#leaflet-map { width: 100%; height: 100%; }
+.map-pane { position: relative; overflow: hidden; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* Everything that overlays the map lives in .map-stage, so the chip bar above
+   it takes its own row instead of sitting on top of the toolbar or panels. */
+.map-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#leaflet-map { position: absolute; inset: 0; }
+
+/* List chips (2026-10-21): tap to switch a list on or off, any combination. */
+.list-chips {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex: none;
+  overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.list-chips[hidden] { display: none; }
+.list-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 6px 13px;
+  border: 1.5px solid var(--line); border-radius: 999px; background: var(--panel-2); color: var(--ink-dim);
+  font-size: 13px; cursor: pointer;
+}
+.list-chip .chip-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--chip-color, var(--accent)); opacity: 0.45; }
+.list-chip .chip-count { font-size: 11px; opacity: 0.75; }
+.list-chip.on { border-color: var(--chip-color, var(--accent)); background: var(--panel); color: var(--ink); font-weight: 600; }
+.list-chip.on .chip-dot { opacity: 1; }
+.list-chip.all { border-style: dashed; }
+.list-chip.all.on { border-color: var(--accent); }
 .map-toolbar { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: flex-start; z-index: 500; pointer-events: none; }
 .map-toolbar > * { pointer-events: auto; }
 .scale-note { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 8px 12px; font-size: 11px; color: var(--ink-dim); max-width: 230px; }

@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261021e">
-<link rel="stylesheet" href="assets/css/app.css?v=20261021e">
-<link rel="stylesheet" href="assets/css/map.css?v=20261021e">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261021g">
+<link rel="stylesheet" href="assets/css/app.css?v=20261021g">
+<link rel="stylesheet" href="assets/css/map.css?v=20261021g">
 </head>
 <body>
 <div class="app">
@@ -40,8 +40,9 @@
         <div class="section-label">Brands on map</div>
         <div class="brand-list" id="brand-list"></div>
         <button class="ghost-btn" id="add-brand-btn">+ Upload brand spreadsheet</button>
-        <button class="ghost-btn" id="import-snapshot-btn">+ Import brand snapshot</button>
-        <div class="hint">Snapshot (&#128190;) = one brand's full data as a single file, for moving between your own computers -- import it back into Account Atlas anywhere with just a browser. Map viewer (&#128506;) = a standalone HTML file with the map baked in, for sending to anyone -- no login, no Account Atlas install, just double-click to open. Save either one and reopen it again later like any other file.</div>
+        <button class="ghost-btn" id="import-snapshot-btn">+ Import snapshots or a backup (pick several at once)</button>
+        <button class="ghost-btn" id="backup-all-btn">Back up all lists to one file</button>
+        <div class="hint">Snapshot (&#128190;) = one brand's full data as a single file, for moving between your own computers -- import it back into Account Atlas anywhere with just a browser. Back up all lists = every list in one file, import it the same way to restore them all. Map viewer (&#128506;) = a standalone HTML file with the map baked in, for sending to anyone -- no login, no Account Atlas install, just double-click to open. Save either one and reopen it again later like any other file.</div>
       </div>
 
       <div class="section">
@@ -103,6 +104,8 @@
     </aside>
 
     <div class="map-pane">
+      <div class="list-chips" id="list-chips" hidden></div>
+      <div class="map-stage">
       <div class="map-toolbar">
         <div class="toolbar-left">
           <button class="solid-btn near-btn" id="near-me-btn">&#128205; Near me</button>
@@ -134,6 +137,7 @@
         <button class="detail-close" id="detail-close" title="Close" aria-label="Close">&times;</button>
         <div id="detail-body"></div>
       </aside>
+      </div>
     </div>
   </div>
 </div>
@@ -189,6 +193,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module" src="src/app.js?v=20261021e"></script>
+<script type="module" src="src/app.js?v=20261021g"></script>
 </body>
 </html>
