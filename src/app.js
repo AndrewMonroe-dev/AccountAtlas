@@ -1,9 +1,9 @@
-import * as db from './core/db.js?v=20260909';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20260909';
-import { buildMatches } from './data/matcher.js?v=20260909';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20260909';
-import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20260909';
-import { initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor } from './modules/mapView.js?v=20260909';
+import * as db from './core/db.js?v=20261021';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021';
+import { buildMatches } from './data/matcher.js?v=20261021';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021';
+import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021';
+import { initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor } from './modules/mapView.js?v=20261021';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -546,7 +546,7 @@ async function main() {
   // pins vanish on zoom-out before: a stray click set an invisible county
   // filter, and zooming back out kept showing just that one county instead
   // of everything, with no on-screen sign the filter was even active.
-  await initMap('leaflet-map', { onCountyClickFn: (name) => { flyToCounty(name); } });
+  await initMap('leaflet-map', { onCountyClickFn: (name) => { flyToCounty(name, { onlyZoomIn: true }); } });
   await loadAll();
   await recomputeMatches();
   render();

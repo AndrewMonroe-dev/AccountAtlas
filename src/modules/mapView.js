@@ -12,6 +12,9 @@ let detailBody = null;
 
 const MI_CENTER = [44.6, -85.4];
 const MI_ZOOM = 6;
+const PIN_TOLERANCE_PX = 22;
+const COUNTY_FIT_PADDING = [40, 40];
+let pinEntries = [];
 
 // County names typed into a real Excel by a real person rarely match the
 // map's canonical Census spelling exactly -- "St. Clair" vs "Saint Clair"
@@ -92,7 +95,14 @@ export function renderChoropleth(countyStats) {
         ? `<strong>${name} County</strong><br>${stats.sold} of ${stats.total} accounts sold`
         : `<strong>${name} County</strong><br>no accounts loaded`;
       layer.bindTooltip(label, { sticky: true, className: 'county-tooltip' });
-      layer.on('click', () => { if (onCountyClick) onCountyClick(name); });
+      // Fat-finger friendly: a click that just misses a pin lands on the county
+      // underneath. If a visible pin is within reach, open it instead of
+      // treating the click as "navigate to this county".
+      layer.on('click', (e) => {
+        const hit = nearestPin(e.containerPoint);
+        if (hit) { showDetailPanel(hit.acct, hit.brand); return; }
+        if (onCountyClick) onCountyClick(name);
+      });
       layer.on('mouseover', () => layer.setStyle({ weight: 2 }));
       layer.on('mouseout', () => layer.setStyle({ weight: 1 }));
     },
@@ -114,6 +124,7 @@ function realColor(pct) {
 // pin color/shape and a rendered popup body.
 export function renderPins(accounts, brandsById) {
   clusterGroup.clearLayers();
+  pinEntries = [];
   accounts.forEach((acct) => {
     if (acct.lat === null || acct.lon === null) return;
     const brand = brandsById[acct.brandId];
@@ -127,8 +138,25 @@ export function renderPins(accounts, brandsById) {
       className: sold ? 'pin-sold-glow' : 'pin-unsold',
     });
     marker.on('mouseover', () => showDetailPanel(acct, brand));
+    marker.on('click', () => showDetailPanel(acct, brand));
     clusterGroup.addLayer(marker);
+    pinEntries.push({ marker, acct, brand });
   });
+}
+
+// Closest pin that is actually drawn on screen (not folded into a cluster;
+// circle markers have no _icon so getVisibleParent cannot be used here)
+// within PIN_TOLERANCE_PX of a container point, or null.
+function nearestPin(containerPoint) {
+  if (!map || !clusterGroup || !containerPoint) return null;
+  let best = null;
+  let bestDist = PIN_TOLERANCE_PX;
+  for (const entry of pinEntries) {
+    if (!map.hasLayer(entry.marker)) continue;
+    const d = map.latLngToContainerPoint(entry.marker.getLatLng()).distanceTo(containerPoint);
+    if (d <= bestDist) { best = entry; bestDist = d; }
+  }
+  return best;
 }
 
 function getCssVar(name) {
@@ -184,15 +212,22 @@ function escapeHtml(s) {
   }[c]));
 }
 
-export function flyToCounty(countyName) {
+// onlyZoomIn: used by map clicks so a stray click while already zoomed in
+// tighter than the county view never zooms back out. The county dropdown
+// leaves it off so it always navigates.
+export function flyToCounty(countyName, { onlyZoomIn = false } = {}) {
   const target = normalizeCountyName(countyName);
   const feature = countyGeoJson.features.find((f) => normalizeCountyName(f.properties.name) === target);
   if (!feature) {
     console.warn(`No county on the map matches "${countyName}" (normalized: "${target}"). Map county names: ${countyGeoJson.features.map((f) => f.properties.name).join(', ')}`);
     return;
   }
-  const layer = L.geoJSON(feature);
-  map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+  const bounds = L.geoJSON(feature).getBounds();
+  if (onlyZoomIn) {
+    const fitZoom = map.getBoundsZoom(bounds, false, L.point(COUNTY_FIT_PADDING[0] * 2, COUNTY_FIT_PADDING[1] * 2));
+    if (map.getZoom() >= fitZoom) return;
+  }
+  map.fitBounds(bounds, { padding: COUNTY_FIT_PADDING });
 }
 
 export function getMap() { return map; }

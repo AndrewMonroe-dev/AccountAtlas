@@ -253,7 +253,7 @@ function realColor(pct) {
   if (pct >= 0.25) return getCssVar('--county-mid-low');
   return getCssVar('--unsold');
 }
-L.geoJSON(DATA.countyGeoJson, {
+const countyLayer = L.geoJSON(DATA.countyGeoJson, {
   style: (feature) => {
     const stats = countyStats.get(normalizeCountyName(feature.properties.name));
     const pct = stats && stats.total ? stats.sold / stats.total : null;
@@ -270,6 +270,7 @@ L.geoJSON(DATA.countyGeoJson, {
 }).addTo(map);
 
 const clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50, spiderfyOnMaxZoom: true });
+const pinEntries = [];
 DATA.accounts.forEach((a) => {
   const sold = Object.values(a.skus).some(Boolean);
   const marker = L.circleMarker([a.lat, a.lon], {
@@ -281,9 +282,24 @@ DATA.accounts.forEach((a) => {
     className: sold ? 'pin-sold-glow' : 'pin-unsold',
   });
   marker.on('mouseover', () => { detailBody.innerHTML = detailHtml(a); detailPanel.hidden = false; });
+  marker.on('click', () => { detailBody.innerHTML = detailHtml(a); detailPanel.hidden = false; });
   clusterGroup.addLayer(marker);
+  pinEntries.push({ marker: marker, acct: a });
 });
 map.addLayer(clusterGroup);
+
+// Fat-finger friendly: a click that just misses a pin lands on the county
+// underneath. Open the nearest visible pin within reach instead.
+countyLayer.on('click', function (e) {
+  let best = null;
+  let bestDist = 22;
+  pinEntries.forEach(function (entry) {
+    if (!map.hasLayer(entry.marker)) return;
+    const d = map.latLngToContainerPoint(entry.marker.getLatLng()).distanceTo(e.containerPoint);
+    if (d <= bestDist) { best = entry; bestDist = d; }
+  });
+  if (best) { detailBody.innerHTML = detailHtml(best.acct); detailPanel.hidden = false; }
+});
 </script>
 </body>
 </html>`;
