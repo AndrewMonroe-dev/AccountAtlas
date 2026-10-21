@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261021h">
-<link rel="stylesheet" href="assets/css/app.css?v=20261021h">
-<link rel="stylesheet" href="assets/css/map.css?v=20261021h">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261021i">
+<link rel="stylesheet" href="assets/css/app.css?v=20261021i">
+<link rel="stylesheet" href="assets/css/map.css?v=20261021i">
 </head>
 <body>
 <div class="app">
@@ -109,6 +109,8 @@
       <div class="map-toolbar">
         <div class="toolbar-left">
           <button class="solid-btn near-btn" id="near-me-btn">&#128205; Near me</button>
+          <button class="nearby-btn" id="nearby-toggle" aria-pressed="true" title="Show stores and bars/restaurants from OpenStreetMap when zoomed in close">&#127978; Nearby: on</button>
+          <div class="nearby-status" id="nearby-status" hidden></div>
           <div class="near-panel" id="near-panel" hidden>
             <div class="near-head">
               <span>Closest accounts</span>
@@ -193,6 +195,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module" src="src/app.js?v=20261021h"></script>
+<script type="module" src="src/app.js?v=20261021i"></script>
 </body>
 </html>

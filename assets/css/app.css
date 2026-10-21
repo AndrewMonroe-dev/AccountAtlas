@@ -132,6 +132,16 @@ button, input, select { font: inherit; color: inherit; }
 /* Route builder (2026-10-21): Near me list top-left, route bar bottom-left. */
 .toolbar-left { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: calc(100% - 262px); }
 .near-btn { box-shadow: var(--shadow); font-weight: 600; padding: 10px 14px; }
+.nearby-btn {
+  box-shadow: var(--shadow); font-size: 12.5px; padding: 8px 12px; min-height: 36px; cursor: pointer;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+}
+.nearby-btn[aria-pressed="false"] { color: var(--ink-dim); }
+.nearby-status {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 6px 10px; font-size: 11px; color: var(--ink-dim); max-width: 260px;
+}
+.nearby-status[hidden] { display: none; }
 .near-panel, .route-bar {
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
   font-size: 12.5px; color: var(--ink);

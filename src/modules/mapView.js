@@ -63,6 +63,8 @@ export async function initMap(containerId, { onCountyClickFn, onRouteToggleFn, r
     hideDetailPanel();
   });
 
+  initNearby();
+
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap contributors',
@@ -149,6 +151,7 @@ function realColor(pct) {
 export function renderPins(accounts, brandsById) {
   clusterGroup.clearLayers();
   pinEntries = [];
+  pinCells = new Map();
   accounts.forEach((acct) => {
     if (acct.lat === null || acct.lon === null) return;
     const brand = brandsById[acct.brandId];
@@ -168,7 +171,12 @@ export function renderPins(accounts, brandsById) {
     });
     clusterGroup.addLayer(marker);
     pinEntries.push({ marker, acct, brand });
+    const cellKey = `${Math.floor(acct.lat * 1000)},${Math.floor(acct.lon * 1000)}`;
+    if (!pinCells.has(cellKey)) pinCells.set(cellKey, []);
+    pinCells.get(cellKey).push({ lat: acct.lat, lon: acct.lon });
   });
+  // Accounts changed, so which businesses count as "already an account" did too.
+  redrawNearby();
 }
 
 // Closest pin that is actually drawn on screen (not folded into a cluster;
@@ -332,6 +340,215 @@ export function flyToCounty(countyName, { onlyZoomIn = false } = {}) {
     if (map.getZoom() >= fitZoom) return;
   }
   map.fitBounds(bounds, { padding: COUNTY_FIT_PADDING });
+}
+
+// ---------------------------------------------------------------------------
+// Nearby businesses (2026-10-21): at street zoom, stores and bars/restaurants
+// from OpenStreetMap, drawn as small gray markers so they read as "not one of
+// my accounts". Data comes from the public Overpass API, which is community
+// run with fair-use limits, so this loads only when the map has stopped
+// moving, never re-asks for an area it already has, and backs off for 30s on
+// any failure. Only the visible map rectangle is sent, nothing from the
+// account lists, and nothing is stored. A business within 40 m of one of the
+// user's own account pins is hidden on the assumption it is that account.
+// ---------------------------------------------------------------------------
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const NEARBY_KEY = 'aa-nearby-v1';
+const NEARBY_MIN_ZOOM = 15;
+const NEARBY_MAX = 300;
+const NEARBY_HIDE_WITHIN_M = 40;
+const NEARBY_RETRY_MS = 30000;
+const NEARBY_PLACE_CAP = 3000;
+const SHOP_LABELS = {
+  alcohol: 'Liquor store', wine: 'Wine shop', supermarket: 'Supermarket',
+  convenience: 'Convenience store', beverages: 'Beverage store',
+};
+const AMENITY_LABELS = { fuel: 'Gas station', bar: 'Bar', pub: 'Pub', restaurant: 'Restaurant' };
+
+let nearbyOn = true;
+let nearbyLayer = null;
+let nearbyPlaces = new Map();   // osm id -> { id, name, kind, label, lat, lon, addr }
+let nearbyCovered = [];         // [{ box, zoom, truncated }] areas already fetched
+let nearbyBusy = false;
+let nearbyAgain = false;
+let nearbyBlockedUntil = 0;
+let nearbyTimer = null;
+let nearbyMsg = '';
+let pinCells = new Map();       // spatial hash of account pins, ~100 m cells
+
+function readNearbyPref() {
+  try { return localStorage.getItem(NEARBY_KEY) !== 'off'; } catch { return true; }
+}
+function writeNearbyPref(on) {
+  try { localStorage.setItem(NEARBY_KEY, on ? 'on' : 'off'); } catch { /* storage blocked */ }
+}
+
+function initNearby() {
+  nearbyOn = readNearbyPref();
+  nearbyLayer = L.layerGroup();
+  const toggle = document.getElementById('nearby-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      nearbyOn = !nearbyOn;
+      writeNearbyPref(nearbyOn);
+      nearbyMsg = '';
+      nearbyBlockedUntil = 0;
+      syncNearby();
+      redrawNearby();
+      if (nearbyOn) loadNearby();
+    });
+  }
+  map.on('moveend', () => { syncNearby(); redrawNearby(); scheduleNearby(); });
+  syncNearby();
+}
+
+function scheduleNearby() {
+  clearTimeout(nearbyTimer);
+  nearbyTimer = setTimeout(loadNearby, 700);
+}
+
+// Shows or hides the layer for the current zoom, and keeps the toggle button
+// and the small status line in step.
+function syncNearby() {
+  if (!map || !nearbyLayer) return;
+  const zoomedIn = map.getZoom() >= NEARBY_MIN_ZOOM;
+  const show = nearbyOn && zoomedIn;
+  if (show && !map.hasLayer(nearbyLayer)) map.addLayer(nearbyLayer);
+  if (!show && map.hasLayer(nearbyLayer)) map.removeLayer(nearbyLayer);
+  const toggle = document.getElementById('nearby-toggle');
+  if (toggle) {
+    toggle.textContent = nearbyOn ? '\u{1F3EA} Nearby: on' : '\u{1F3EA} Nearby: off';
+    toggle.setAttribute('aria-pressed', String(nearbyOn));
+  }
+  const status = document.getElementById('nearby-status');
+  if (status) {
+    const text = !nearbyOn ? '' : (nearbyMsg || (zoomedIn ? '' : 'Zoom in closer to see nearby businesses.'));
+    status.textContent = text;
+    status.hidden = !text;
+  }
+}
+
+async function loadNearby() {
+  if (!map || !nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM) return;
+  if (nearbyBusy) { nearbyAgain = true; return; }
+  if (Date.now() < nearbyBlockedUntil) {
+    // Panning during the back-off replaced the retry timer, so re-arm it for
+    // the moment the back-off ends.
+    clearTimeout(nearbyTimer);
+    nearbyTimer = setTimeout(loadNearby, nearbyBlockedUntil - Date.now() + 500);
+    return;
+  }
+  const view = map.getBounds();
+  const zoom = map.getZoom();
+  // A box that hit the cap only covers views at its own zoom or wider: a closer
+  // view of it may hold businesses that were cut off.
+  if (nearbyCovered.some((c) => (!c.truncated || zoom <= c.zoom) && c.box.contains(view))) return;
+
+  const box = view.pad(0.25);
+  const bbox = [box.getSouth(), box.getWest(), box.getNorth(), box.getEast()].map((v) => v.toFixed(5)).join(',');
+  const query = '[out:json][timeout:20];('
+    + `nwr["shop"~"^(alcohol|wine|supermarket|convenience|beverages)$"](${bbox});`
+    + `nwr["amenity"~"^(fuel|bar|pub|restaurant)$"](${bbox});`
+    + `);out center ${NEARBY_MAX};`;
+
+  nearbyBusy = true;
+  nearbyMsg = 'Loading nearby businesses...';
+  syncNearby();
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const res = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(query),
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const elements = Array.isArray(data.elements) ? data.elements : [];
+    // Overpass reports a server-side timeout as a normal 200 with a remark.
+    if (data.remark && !elements.length) throw new Error(data.remark);
+    if (nearbyPlaces.size > NEARBY_PLACE_CAP) { nearbyPlaces = new Map(); nearbyCovered = []; }
+    addNearbyElements(elements);
+    const truncated = elements.length >= NEARBY_MAX;
+    nearbyCovered.push({ box, zoom, truncated });
+    nearbyMsg = truncated ? `Dense area: showing the first ${NEARBY_MAX} businesses here. Zoom in for more.` : '';
+  } catch (err) {
+    nearbyBlockedUntil = Date.now() + NEARBY_RETRY_MS;
+    nearbyMsg = 'Nearby businesses are unavailable right now. Retrying shortly.';
+    clearTimeout(nearbyTimer);
+    nearbyTimer = setTimeout(loadNearby, NEARBY_RETRY_MS + 500);
+  } finally {
+    clearTimeout(timeout);
+    nearbyBusy = false;
+  }
+  syncNearby();
+  redrawNearby();
+  if (nearbyAgain) { nearbyAgain = false; scheduleNearby(); }
+}
+
+function addNearbyElements(elements) {
+  elements.forEach((el) => {
+    const tags = el.tags || {};
+    const lat = el.lat !== undefined ? el.lat : (el.center && el.center.lat);
+    const lon = el.lon !== undefined ? el.lon : (el.center && el.center.lon);
+    if (!tags.name || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const label = SHOP_LABELS[tags.shop] || AMENITY_LABELS[tags.amenity];
+    if (!label) return;
+    const id = `${el.type}${el.id}`;
+    if (nearbyPlaces.has(id)) return;
+    const street = [tags['addr:housenumber'], tags['addr:street']].filter(Boolean).join(' ');
+    const addr = [street, tags['addr:city']].filter(Boolean).join(', ');
+    const kind = ['bar', 'pub', 'restaurant'].includes(tags.amenity) ? 'onprem' : 'store';
+    nearbyPlaces.set(id, { id, name: tags.name, kind, label, lat, lon, addr });
+  });
+}
+
+function nearAnAccount(lat, lon) {
+  const ci = Math.floor(lat * 1000);
+  const cj = Math.floor(lon * 1000);
+  for (let di = -1; di <= 1; di++) {
+    for (let dj = -1; dj <= 1; dj++) {
+      const cell = pinCells.get(`${ci + di},${cj + dj}`);
+      if (!cell) continue;
+      for (const p of cell) {
+        if (map.distance([lat, lon], [p.lat, p.lon]) < NEARBY_HIDE_WITHIN_M) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Draws only what is near the current view, so the DOM stays small however
+// much has been fetched while panning around.
+function redrawNearby() {
+  if (!map || !nearbyLayer) return;
+  nearbyLayer.clearLayers();
+  if (!nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM) return;
+  const view = map.getBounds().pad(0.5);
+  nearbyPlaces.forEach((p) => {
+    if (!view.contains([p.lat, p.lon]) || nearAnAccount(p.lat, p.lon)) return;
+    const icon = L.divIcon({
+      className: `nearby-pin ${p.kind}`, html: '<span></span>', iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+    const marker = L.marker([p.lat, p.lon], { icon, zIndexOffset: -500, title: p.name });
+    marker.bindPopup(nearbyPopupHtml(p));
+    marker.on('click', (e) => {
+      L.DomEvent.stopPropagation(e);
+      hideDetailPanel();
+    });
+    marker.addTo(nearbyLayer);
+  });
+}
+
+function nearbyPopupHtml(p) {
+  const link = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+  return `<div class="map-popup nearby-popup">
+      <div class="pname">${escapeHtml(p.name)}</div>
+      <div class="paddr">${escapeHtml(p.label)}${p.addr ? ' &middot; ' + escapeHtml(p.addr) : ''}</div>
+      <div class="fam">Not in your lists</div>
+      <a class="nearby-link" href="${link}" target="_blank" rel="noopener">Open in Google Maps</a>
+    </div>`;
 }
 
 export function getMap() { return map; }
