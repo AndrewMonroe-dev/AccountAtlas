@@ -31,6 +31,13 @@
   content: ''; position: absolute; left: 7px; top: 7px; width: 12px; height: 12px; box-sizing: border-box;
   background: #7d8580; border: 2px solid #ffffff; box-shadow: 0 0 2px rgba(0,0,0,0.55);
 }
+/* Name beside the marker: dark text with a white outline so it reads on any
+   map color. Taps pass through to the 26px marker box. */
+.nearby-label {
+  position: absolute; left: 25px; top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none;
+  font: 600 13px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #1c2622;
+  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 4px #fff, 0 0 4px #fff;
+}
 .nearby-pin.onprem span::before { border-radius: 50%; background: #ffffff; border: 2.5px solid #7d8580; }
 .nearby-link {
   display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600; color: var(--accent); text-decoration: none;

@@ -355,6 +355,8 @@ export function flyToCounty(countyName, { onlyZoomIn = false } = {}) {
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NEARBY_KEY = 'aa-nearby-v1';
 const NEARBY_MIN_ZOOM = 15;
+const NEARBY_LABEL_ZOOM = 17;       // names beside the markers from here in
+const NEARBY_LABEL_MAX_CHARS = 26;
 const NEARBY_MAX = 300;
 const NEARBY_HIDE_WITHIN_M = 40;
 const NEARBY_RETRY_MS = 30000;
@@ -526,10 +528,16 @@ function redrawNearby() {
   nearbyLayer.clearLayers();
   if (!nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM) return;
   const view = map.getBounds().pad(0.5);
+  const visible = [];
   nearbyPlaces.forEach((p) => {
     if (!view.contains([p.lat, p.lon]) || nearAnAccount(p.lat, p.lon)) return;
+    visible.push(p);
+  });
+  const labelled = map.getZoom() >= NEARBY_LABEL_ZOOM ? pickNearbyLabels(visible) : new Set();
+  visible.forEach((p) => {
+    const label = labelled.has(p.id) ? `<b class="nearby-label">${escapeHtml(shortName(p.name))}</b>` : '';
     const icon = L.divIcon({
-      className: `nearby-pin ${p.kind}`, html: '<span></span>', iconSize: [26, 26], iconAnchor: [13, 13],
+      className: `nearby-pin ${p.kind}`, html: `<span></span>${label}`, iconSize: [26, 26], iconAnchor: [13, 13],
     });
     const marker = L.marker([p.lat, p.lon], { icon, zIndexOffset: -500, title: p.name });
     marker.bindPopup(nearbyPopupHtml(p));
@@ -539,6 +547,41 @@ function redrawNearby() {
     });
     marker.addTo(nearbyLayer);
   });
+}
+
+function shortName(name) {
+  return name.length > NEARBY_LABEL_MAX_CHARS ? name.slice(0, NEARBY_LABEL_MAX_CHARS - 1).trimEnd() + '…' : name;
+}
+
+// Which businesses get a name drawn beside their marker. Greedy, top to bottom:
+// a label is skipped if it would cover another marker, one of the user's own
+// account pins, or a label already placed. A skipped business keeps its marker
+// and still shows its name in the tap popup.
+function pickNearbyLabels(places) {
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const taken = [];
+  places.forEach((p) => {
+    const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+    taken.push({ x: pt.x - 8, y: pt.y - 8, w: 16, h: 16 });
+  });
+  const bounds = map.getBounds().pad(0.1);
+  pinEntries.forEach((e) => {
+    if (!bounds.contains([e.acct.lat, e.acct.lon])) return;
+    const pt = map.latLngToContainerPoint([e.acct.lat, e.acct.lon]);
+    taken.push({ x: pt.x - 10, y: pt.y - 10, w: 20, h: 20 });
+  });
+  const chosen = new Set();
+  places
+    .map((p) => ({ p, pt: map.latLngToContainerPoint([p.lat, p.lon]) }))
+    .sort((a, b) => a.pt.y - b.pt.y || a.pt.x - b.pt.x)
+    .forEach(({ p, pt }) => {
+      const width = Math.min(170, shortName(p.name).length * 7.6 + 6);
+      const rect = { x: pt.x + 12, y: pt.y - 9, w: width, h: 18 };
+      if (taken.some((t) => overlaps(t, rect))) return;
+      taken.push(rect);
+      chosen.add(p.id);
+    });
+  return chosen;
 }
 
 function nearbyPopupHtml(p) {
