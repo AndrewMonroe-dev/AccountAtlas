@@ -1,8 +1,9 @@
 # Nothing brand/account-specific ever belongs in this repo. All of that data
 # lives client-side only, in the browser's IndexedDB, via the in-app Excel
 # upload. If a file matching these patterns ever shows up staged, stop and
-# check it before committing -- see data/geo/ for the one legitimate
-# exception (public Michigan county boundaries, no account data).
+# check it before committing -- see data/geo/ and data/nearby/ for the
+# legitimate exceptions (public Michigan county boundaries and public
+# OpenStreetMap business listings, no account data).
 *.xlsx
 *.xls
 *-addresses.csv

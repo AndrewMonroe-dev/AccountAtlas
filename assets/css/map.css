@@ -39,6 +39,7 @@
   text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 4px #fff, 0 0 4px #fff;
 }
 .nearby-pin.onprem span::before { border-radius: 50%; background: #ffffff; border: 2.5px solid #7d8580; }
+.nearby-asof { font-size: 10.5px; color: var(--ink-dim); margin: -2px 0 2px; }
 .nearby-link {
   display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600; color: var(--accent); text-decoration: none;
 }

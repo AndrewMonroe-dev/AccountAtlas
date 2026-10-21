@@ -103,6 +103,14 @@ Then open the printed localhost URL. No build step.
 - `data/geo/michigan-counties.geojson` — real Michigan county boundaries
   (U.S. Census Bureau cartographic boundary files, public domain). No
   account data.
+- `data/nearby/michigan-places.json` — named stores, gas stations, bars,
+  pubs and restaurants for the "Nearby businesses" layer. Public map data
+  from OpenStreetMap (© OpenStreetMap contributors, ODbL 1.0,
+  https://www.openstreetmap.org/copyright), extract by Geofabrik. No account
+  data. Rebuilt by `tools/buildNearbyPlaces.py`, which documents the refresh
+  steps.
+- `tools/buildNearbyPlaces.py` — builds the file above from a Michigan
+  `.osm.pbf` extract (needs `pip install osmium`).
 - `tools/server.mjs` — local server: serves the app at `http://localhost:8181`
   and exposes `/api/geocode` for the in-app one-click Geocode button.
 - `tools/geocode.mjs` — standalone CLI fallback for the same Census

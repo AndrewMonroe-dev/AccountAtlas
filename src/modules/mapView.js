@@ -343,39 +343,38 @@ export function flyToCounty(countyName, { onlyZoomIn = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Nearby businesses (2026-10-21): at street zoom, stores and bars/restaurants
-// from OpenStreetMap, drawn as small gray markers so they read as "not one of
-// my accounts". Data comes from the public Overpass API, which is community
-// run with fair-use limits, so this loads only when the map has stopped
-// moving, never re-asks for an area it already has, and backs off for 30s on
-// any failure. Only the visible map rectangle is sent, nothing from the
-// account lists, and nothing is stored. A business within 40 m of one of the
-// user's own account pins is hidden on the assumption it is that account.
+// Nearby businesses (2026-10-21): at street zoom, stores, gas stations and
+// bars/restaurants from OpenStreetMap, drawn as small gray markers so they read
+// as "not one of my accounts". The data is a static snapshot built from the
+// Michigan OpenStreetMap extract (tools/buildNearbyPlaces.py ->
+// data/nearby/michigan-places.json), so there is no live server to be busy or
+// blocked: one file, fetched the first time the layer is needed, then indexed
+// in memory. Nothing about the user's map view or accounts leaves the device.
+// A business within 40 m of one of the user's own account pins is hidden on the
+// assumption it is that account.
+//
+// Data (c) OpenStreetMap contributors, ODbL 1.0. Bump NEARBY_DATA_VERSION
+// whenever the file is rebuilt so browsers fetch the new copy.
 // ---------------------------------------------------------------------------
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const NEARBY_DATA_VERSION = '20261020';
+const NEARBY_DATA_URL = `data/nearby/michigan-places.json?v=${NEARBY_DATA_VERSION}`;
 const NEARBY_KEY = 'aa-nearby-v1';
 const NEARBY_MIN_ZOOM = 15;
 const NEARBY_LABEL_ZOOM = 17;       // names beside the markers from here in
 const NEARBY_LABEL_MAX_CHARS = 26;
-const NEARBY_MAX = 300;
+const NEARBY_MAX = 300;             // most markers drawn at once, nearest the view centre first
 const NEARBY_HIDE_WITHIN_M = 40;
 const NEARBY_RETRY_MS = 30000;
-const NEARBY_PLACE_CAP = 3000;
-const SHOP_LABELS = {
-  alcohol: 'Liquor store', wine: 'Wine shop', supermarket: 'Supermarket',
-  convenience: 'Convenience store', beverages: 'Beverage store',
-};
-const AMENITY_LABELS = { fuel: 'Gas station', bar: 'Bar', pub: 'Pub', restaurant: 'Restaurant' };
+const NEARBY_CELL = 0.01;           // search-grid cell in degrees, about 1 km
+const ON_PREMISE_LABELS = ['Bar', 'Pub', 'Restaurant'];
 
 let nearbyOn = true;
 let nearbyLayer = null;
-let nearbyPlaces = new Map();   // osm id -> { id, name, kind, label, lat, lon, addr }
-let nearbyCovered = [];         // [{ box, zoom, truncated }] areas already fetched
-let nearbyBusy = false;
-let nearbyAgain = false;
-let nearbyBlockedUntil = 0;
-let nearbyTimer = null;
-let nearbyMsg = '';
+let nearbyData = null;          // { asOf, grid: Map cellKey -> [place] }
+let nearbyLoading = null;       // in-flight load, so it is only started once
+let nearbyRetryAfter = 0;
+let nearbyLoadMsg = '';         // "Loading..." or a load failure
+let nearbyDenseMsg = '';        // set when more were in view than are drawn
 let pinCells = new Map();       // spatial hash of account pins, ~100 m cells
 
 function readNearbyPref() {
@@ -393,20 +392,60 @@ function initNearby() {
     toggle.addEventListener('click', () => {
       nearbyOn = !nearbyOn;
       writeNearbyPref(nearbyOn);
-      nearbyMsg = '';
-      nearbyBlockedUntil = 0;
-      syncNearby();
-      redrawNearby();
-      if (nearbyOn) loadNearby();
+      nearbyRetryAfter = 0;
+      refreshNearby();
     });
   }
-  map.on('moveend', () => { syncNearby(); redrawNearby(); scheduleNearby(); });
+  map.on('moveend', refreshNearby);
   syncNearby();
 }
 
-function scheduleNearby() {
-  clearTimeout(nearbyTimer);
-  nearbyTimer = setTimeout(loadNearby, 700);
+// One entry point for "the map moved / the toggle changed": make sure the data
+// is loaded when it is needed, then redraw for the current view.
+function refreshNearby() {
+  syncNearby();
+  if (nearbyOn && map.getZoom() >= NEARBY_MIN_ZOOM && !nearbyData && Date.now() >= nearbyRetryAfter) {
+    loadNearbyData().then(() => { syncNearby(); redrawNearby(); }).catch(() => syncNearby());
+  }
+  redrawNearby();
+}
+
+function loadNearbyData() {
+  if (nearbyData) return Promise.resolve(nearbyData);
+  if (nearbyLoading) return nearbyLoading;
+  nearbyLoadMsg = 'Loading nearby businesses...';
+  syncNearby();
+  nearbyLoading = fetch(NEARBY_DATA_URL)
+    .then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then((data) => {
+      const labels = data.labels || [];
+      const grid = new Map();
+      (data.places || []).forEach((row, i) => {
+        const [lat, lon, name, labelIdx, addr] = row;
+        const label = labels[labelIdx];
+        if (!name || !label || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const place = {
+          id: i, name, label, lat, lon, addr: addr || '',
+          kind: ON_PREMISE_LABELS.includes(label) ? 'onprem' : 'store',
+        };
+        const key = `${Math.floor(lat / NEARBY_CELL)},${Math.floor(lon / NEARBY_CELL)}`;
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(place);
+      });
+      nearbyData = { asOf: data.asOf || '', grid };
+      nearbyLoadMsg = '';
+      return nearbyData;
+    })
+    .catch((err) => {
+      nearbyRetryAfter = Date.now() + NEARBY_RETRY_MS;
+      nearbyLoadMsg = 'Nearby businesses could not be loaded. They will be retried when you move the map.';
+      throw err;
+    })
+    .finally(() => { nearbyLoading = null; });
+  return nearbyLoading;
 }
 
 // Shows or hides the layer for the current zoom, and keeps the toggle button
@@ -424,86 +463,10 @@ function syncNearby() {
   }
   const status = document.getElementById('nearby-status');
   if (status) {
-    const text = !nearbyOn ? '' : (nearbyMsg || (zoomedIn ? '' : 'Zoom in closer to see nearby businesses.'));
+    const text = !nearbyOn ? '' : (nearbyLoadMsg || (zoomedIn ? nearbyDenseMsg : 'Zoom in closer to see nearby businesses.'));
     status.textContent = text;
     status.hidden = !text;
   }
-}
-
-async function loadNearby() {
-  if (!map || !nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM) return;
-  if (nearbyBusy) { nearbyAgain = true; return; }
-  if (Date.now() < nearbyBlockedUntil) {
-    // Panning during the back-off replaced the retry timer, so re-arm it for
-    // the moment the back-off ends.
-    clearTimeout(nearbyTimer);
-    nearbyTimer = setTimeout(loadNearby, nearbyBlockedUntil - Date.now() + 500);
-    return;
-  }
-  const view = map.getBounds();
-  const zoom = map.getZoom();
-  // A box that hit the cap only covers views at its own zoom or wider: a closer
-  // view of it may hold businesses that were cut off.
-  if (nearbyCovered.some((c) => (!c.truncated || zoom <= c.zoom) && c.box.contains(view))) return;
-
-  const box = view.pad(0.25);
-  const bbox = [box.getSouth(), box.getWest(), box.getNorth(), box.getEast()].map((v) => v.toFixed(5)).join(',');
-  const query = '[out:json][timeout:20];('
-    + `nwr["shop"~"^(alcohol|wine|supermarket|convenience|beverages)$"](${bbox});`
-    + `nwr["amenity"~"^(fuel|bar|pub|restaurant)$"](${bbox});`
-    + `);out center ${NEARBY_MAX};`;
-
-  nearbyBusy = true;
-  nearbyMsg = 'Loading nearby businesses...';
-  syncNearby();
-  const ctl = new AbortController();
-  const timeout = setTimeout(() => ctl.abort(), 20000);
-  try {
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(query),
-      signal: ctl.signal,
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const elements = Array.isArray(data.elements) ? data.elements : [];
-    // Overpass reports a server-side timeout as a normal 200 with a remark.
-    if (data.remark && !elements.length) throw new Error(data.remark);
-    if (nearbyPlaces.size > NEARBY_PLACE_CAP) { nearbyPlaces = new Map(); nearbyCovered = []; }
-    addNearbyElements(elements);
-    const truncated = elements.length >= NEARBY_MAX;
-    nearbyCovered.push({ box, zoom, truncated });
-    nearbyMsg = truncated ? `Dense area: showing the first ${NEARBY_MAX} businesses here. Zoom in for more.` : '';
-  } catch (err) {
-    nearbyBlockedUntil = Date.now() + NEARBY_RETRY_MS;
-    nearbyMsg = 'Nearby businesses are unavailable right now. Retrying shortly.';
-    clearTimeout(nearbyTimer);
-    nearbyTimer = setTimeout(loadNearby, NEARBY_RETRY_MS + 500);
-  } finally {
-    clearTimeout(timeout);
-    nearbyBusy = false;
-  }
-  syncNearby();
-  redrawNearby();
-  if (nearbyAgain) { nearbyAgain = false; scheduleNearby(); }
-}
-
-function addNearbyElements(elements) {
-  elements.forEach((el) => {
-    const tags = el.tags || {};
-    const lat = el.lat !== undefined ? el.lat : (el.center && el.center.lat);
-    const lon = el.lon !== undefined ? el.lon : (el.center && el.center.lon);
-    if (!tags.name || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    const label = SHOP_LABELS[tags.shop] || AMENITY_LABELS[tags.amenity];
-    if (!label) return;
-    const id = `${el.type}${el.id}`;
-    if (nearbyPlaces.has(id)) return;
-    const street = [tags['addr:housenumber'], tags['addr:street']].filter(Boolean).join(' ');
-    const addr = [street, tags['addr:city']].filter(Boolean).join(', ');
-    const kind = ['bar', 'pub', 'restaurant'].includes(tags.amenity) ? 'onprem' : 'store';
-    nearbyPlaces.set(id, { id, name: tags.name, kind, label, lat, lon, addr });
-  });
 }
 
 function nearAnAccount(lat, lon) {
@@ -521,18 +484,41 @@ function nearAnAccount(lat, lon) {
   return false;
 }
 
-// Draws only what is near the current view, so the DOM stays small however
-// much has been fetched while panning around.
+// Everything in the data inside a lat/lon rectangle, via the search grid.
+function nearbyPlacesIn(bounds) {
+  const out = [];
+  const i0 = Math.floor(bounds.getSouth() / NEARBY_CELL);
+  const i1 = Math.floor(bounds.getNorth() / NEARBY_CELL);
+  const j0 = Math.floor(bounds.getWest() / NEARBY_CELL);
+  const j1 = Math.floor(bounds.getEast() / NEARBY_CELL);
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      const cell = nearbyData.grid.get(`${i},${j}`);
+      if (!cell) continue;
+      for (const p of cell) if (bounds.contains([p.lat, p.lon])) out.push(p);
+    }
+  }
+  return out;
+}
+
+// Draws only what is in (or just outside) the current view, and never more than
+// NEARBY_MAX markers, so the DOM stays small in a dense city.
 function redrawNearby() {
   if (!map || !nearbyLayer) return;
   nearbyLayer.clearLayers();
-  if (!nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM) return;
-  const view = map.getBounds().pad(0.5);
-  const visible = [];
-  nearbyPlaces.forEach((p) => {
-    if (!view.contains([p.lat, p.lon]) || nearAnAccount(p.lat, p.lon)) return;
-    visible.push(p);
-  });
+  nearbyDenseMsg = '';
+  if (!nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM || !nearbyData) { syncNearby(); return; }
+  const centre = map.getCenter();
+  let visible = nearbyPlacesIn(map.getBounds().pad(0.1)).filter((p) => !nearAnAccount(p.lat, p.lon));
+  if (visible.length > NEARBY_MAX) {
+    visible = visible
+      .map((p) => ({ p, d: map.distance(centre, [p.lat, p.lon]) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, NEARBY_MAX)
+      .map((x) => x.p);
+    nearbyDenseMsg = `Dense area: showing the closest ${NEARBY_MAX} businesses. Zoom in for more.`;
+  }
+  syncNearby();
   const labelled = map.getZoom() >= NEARBY_LABEL_ZOOM ? pickNearbyLabels(visible) : new Set();
   visible.forEach((p) => {
     const label = labelled.has(p.id) ? `<b class="nearby-label">${escapeHtml(shortName(p.name))}</b>` : '';
@@ -584,12 +570,20 @@ function pickNearbyLabels(places) {
   return chosen;
 }
 
+function nearbyAsOfText() {
+  const d = nearbyData && nearbyData.asOf ? new Date(nearbyData.asOf + 'T00:00:00') : null;
+  const when = d && !Number.isNaN(d.getTime())
+    ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  return `OpenStreetMap data${when ? ' as of ' + escapeHtml(when) : ''}`;
+}
+
 function nearbyPopupHtml(p) {
   const link = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
   return `<div class="map-popup nearby-popup">
       <div class="pname">${escapeHtml(p.name)}</div>
       <div class="paddr">${escapeHtml(p.label)}${p.addr ? ' &middot; ' + escapeHtml(p.addr) : ''}</div>
       <div class="fam">Not in your lists</div>
+      <div class="nearby-asof">${nearbyAsOfText()}</div>
       <a class="nearby-link" href="${link}" target="_blank" rel="noopener">Open in Google Maps</a>
     </div>`;
 }
