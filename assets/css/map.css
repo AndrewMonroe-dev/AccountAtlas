@@ -12,6 +12,17 @@
 .map-popup .chip.unsold { background: var(--unsold-bg); color: var(--unsold); }
 .map-popup .chip-empty { font-size: 10.5px; color: var(--ink-dim); }
 
+/* Route builder: tick-box in the detail panel and the numbered stop badges. */
+.route-add { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; font-size: 13px; cursor: pointer; padding: 6px 0; }
+.route-add input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+.route-stop-num { font-size: 11px; color: var(--accent); font-weight: 700; }
+
+.route-badge span {
+  width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--accent-ink); border: 2px solid #ffffff;
+  font: 700 12px/1 system-ui, sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+}
+
 .pin-sold-glow {
   filter: drop-shadow(0 0 3px var(--pin-sold)) drop-shadow(0 0 7px var(--pin-sold));
 }

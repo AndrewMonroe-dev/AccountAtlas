@@ -15,6 +15,15 @@ const MI_ZOOM = 6;
 const PIN_TOLERANCE_PX = 22;
 const COUNTY_FIT_PADDING = [40, 40];
 let pinEntries = [];
+let routeLayer = null;
+let userLayer = null;
+let onRouteToggle = null;   // (acct, wantOn) => boolean, false = refused
+let routePosition = null;   // (accountId) => 1-based stop number, 0 if none
+let currentPanel = null;    // { acct, brand } currently shown in the detail panel
+// Once a pin is clicked the panel stays put: otherwise hovering across other
+// pins on the way to the "Add to route" checkbox would swap the content out
+// from under the cursor.
+let panelPinned = false;
 
 // County names typed into a real Excel by a real person rarely match the
 // map's canonical Census spelling exactly -- "St. Clair" vs "Saint Clair"
@@ -31,8 +40,10 @@ function normalizeCountyName(name) {
     .trim();
 }
 
-export async function initMap(containerId, { onCountyClickFn } = {}) {
+export async function initMap(containerId, { onCountyClickFn, onRouteToggleFn, routePositionFn } = {}) {
   onCountyClick = onCountyClickFn || null;
+  onRouteToggle = onRouteToggleFn || null;
+  routePosition = routePositionFn || null;
 
   detailPanel = document.getElementById('detail-panel');
   detailBody = document.getElementById('detail-body');
@@ -100,7 +111,7 @@ export function renderChoropleth(countyStats) {
       // treating the click as "navigate to this county".
       layer.on('click', (e) => {
         const hit = nearestPin(e.containerPoint);
-        if (hit) { showDetailPanel(hit.acct, hit.brand); return; }
+        if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
         if (onCountyClick) onCountyClick(name);
       });
       layer.on('mouseover', () => layer.setStyle({ weight: 2 }));
@@ -138,7 +149,7 @@ export function renderPins(accounts, brandsById) {
       className: sold ? 'pin-sold-glow' : 'pin-unsold',
     });
     marker.on('mouseover', () => showDetailPanel(acct, brand));
-    marker.on('click', () => showDetailPanel(acct, brand));
+    marker.on('click', () => showDetailPanel(acct, brand, { pin: true }));
     clusterGroup.addLayer(marker);
     pinEntries.push({ marker, acct, brand });
   });
@@ -166,15 +177,90 @@ function getCssVar(name) {
 // The detail panel is deliberately sticky: it stays on screen until either
 // the X is clicked or another store is hovered (which just overwrites the
 // content below) -- no mouseout-hide, so it never disappears mid-look.
-function showDetailPanel(acct, brand) {
+// Clicking a pin (pin: true) also locks it against hover swaps until the X
+// or the next click, so the route checkbox is reachable.
+function showDetailPanel(acct, brand, { pin = false } = {}) {
   if (!detailPanel || !detailBody) return;
+  if (!pin && panelPinned) return;
+  if (pin) panelPinned = true;
+  currentPanel = { acct, brand };
   detailBody.innerHTML = detailHtml(acct, brand);
   detailPanel.hidden = false;
+  const box = detailBody.querySelector('#route-check');
+  if (box) {
+    refreshRouteCheckbox();
+    box.addEventListener('change', () => {
+      const accepted = onRouteToggle ? onRouteToggle(acct, box.checked) : false;
+      if (!accepted) box.checked = !box.checked;
+      refreshRouteCheckbox();
+    });
+  }
 }
 
 function hideDetailPanel() {
+  panelPinned = false;
+  currentPanel = null;
   if (!detailPanel) return;
   detailPanel.hidden = true;
+}
+
+// Re-syncs the open panel's checkbox and "Stop N" label with the route, e.g.
+// after a stop is removed from the route bar or the route is cleared.
+export function refreshRouteCheckbox() {
+  if (!detailBody || !currentPanel) return;
+  const box = detailBody.querySelector('#route-check');
+  const label = detailBody.querySelector('#route-stop-num');
+  if (!box) return;
+  const n = routePosition ? routePosition(currentPanel.acct.id) : 0;
+  box.checked = n > 0;
+  if (label) label.textContent = n > 0 ? `Stop ${n}` : '';
+}
+
+// Numbered badges (in route order) plus a dashed line joining them. They live
+// in their own layer, outside the cluster group, so a stop never disappears
+// into a cluster when the map is zoomed out.
+export function renderRouteStops(stops) {
+  if (!map) return;
+  if (routeLayer) map.removeLayer(routeLayer);
+  routeLayer = L.layerGroup().addTo(map);
+  if (stops.length > 1) {
+    L.polyline(stops.map((s) => [s.lat, s.lon]), {
+      color: getCssVar('--accent'), weight: 3, opacity: 0.8, dashArray: '6 6', interactive: false,
+    }).addTo(routeLayer);
+  }
+  stops.forEach((s, i) => {
+    const icon = L.divIcon({
+      className: 'route-badge', html: `<span>${i + 1}</span>`, iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+    const badge = L.marker([s.lat, s.lon], { icon, zIndexOffset: 1000, title: s.name });
+    badge.on('click', () => {
+      const entry = pinEntries.find((p) => p.acct.id === s.id);
+      if (entry) showDetailPanel(entry.acct, entry.brand, { pin: true });
+    });
+    badge.addTo(routeLayer);
+  });
+  refreshRouteCheckbox();
+}
+
+export function showUserLocation(lat, lon) {
+  if (!map) return;
+  if (userLayer) map.removeLayer(userLayer);
+  userLayer = L.circleMarker([lat, lon], {
+    radius: 9, color: '#ffffff', weight: 3, fillColor: '#2a7fff', fillOpacity: 1, interactive: false,
+  }).addTo(map);
+}
+
+export function fitToPoints(points, maxZoom = 13) {
+  if (!map || !points.length) return;
+  map.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom });
+}
+
+// Zoom to an account and open its panel (used by the Near me list).
+export function focusAccount(accountId) {
+  const entry = pinEntries.find((p) => p.acct.id === accountId);
+  if (!entry || !map) return;
+  map.flyTo([entry.acct.lat, entry.acct.lon], Math.max(map.getZoom(), 15));
+  showDetailPanel(entry.acct, entry.brand, { pin: true });
 }
 
 // Andrew, 2026-08-21: tap-to-navigate, asked for once the mobile layout
@@ -198,6 +284,7 @@ function detailHtml(acct, brand) {
   return `
     <div class="map-popup">
       <div class="pname">${escapeHtml(acct.storeName)}</div>
+      <label class="route-add"><input type="checkbox" id="route-check"> <span>Add to route</span> <span class="route-stop-num" id="route-stop-num"></span></label>
       <a class="paddr" href="${mapsUrlFor(acct)}" target="_blank" rel="noopener" title="Open in Maps">${escapeHtml(acct.county || '')} County &middot; ${escapeHtml(acct.address)}, ${escapeHtml(acct.city)}</a>
       <div class="fam">${escapeHtml(brand ? brand.name : '')} &mdash; sold (${soldSkus.length})</div>
       <div class="chip-row">${soldSkus.length ? soldSkus.map((s) => chip(s, '')).join('') : '<span class="chip-empty">none</span>'}</div>

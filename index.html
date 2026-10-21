@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261021">
-<link rel="stylesheet" href="assets/css/app.css?v=20261021">
-<link rel="stylesheet" href="assets/css/map.css?v=20261021">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261021c">
+<link rel="stylesheet" href="assets/css/app.css?v=20261021c">
+<link rel="stylesheet" href="assets/css/map.css?v=20261021c">
 </head>
 <body>
 <div class="app">
@@ -104,10 +104,32 @@
 
     <div class="map-pane">
       <div class="map-toolbar">
-        <div></div>
+        <div class="toolbar-left">
+          <button class="solid-btn near-btn" id="near-me-btn">&#128205; Near me</button>
+          <div class="near-panel" id="near-panel" hidden>
+            <div class="near-head">
+              <span>Closest unsold accounts</span>
+              <button class="near-close" id="near-close" aria-label="Close">&times;</button>
+            </div>
+            <div id="near-list"></div>
+          </div>
+        </div>
         <div class="scale-note">County tint = sold vs. total penetration for visible brands. Zoom in to split clusters into individual accounts; hover a pin for its full sold/unsold breakdown.</div>
       </div>
       <div id="leaflet-map"></div>
+      <div class="route-bar" id="route-bar" hidden>
+        <div class="route-head">
+          <strong>Route</strong>
+          <span id="route-count"></span>
+        </div>
+        <ol class="route-list" id="route-list"></ol>
+        <div class="route-status" id="route-status"></div>
+        <div class="route-actions">
+          <button class="ghost-btn" id="route-optimize">Optimize order</button>
+          <button class="ghost-btn" id="route-clear">Clear</button>
+          <button class="solid-btn" id="route-start">Start route</button>
+        </div>
+      </div>
       <aside class="detail-panel" id="detail-panel" hidden>
         <button class="detail-close" id="detail-close" title="Close" aria-label="Close">&times;</button>
         <div id="detail-body"></div>
@@ -167,6 +189,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module" src="src/app.js?v=20261021"></script>
+<script type="module" src="src/app.js?v=20261021c"></script>
 </body>
 </html>

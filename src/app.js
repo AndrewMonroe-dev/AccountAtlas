@@ -1,9 +1,15 @@
-import * as db from './core/db.js?v=20261021';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021';
-import { buildMatches } from './data/matcher.js?v=20261021';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021';
-import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021';
-import { initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor } from './modules/mapView.js?v=20261021';
+import * as db from './core/db.js?v=20261021c';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021c';
+import { buildMatches } from './data/matcher.js?v=20261021c';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021c';
+import { exportBrandSnapshot, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021c';
+import {
+  initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
+  renderRouteStops, showUserLocation, fitToPoints, focusAccount,
+} from './modules/mapView.js?v=20261021c';
+import {
+  MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, loadRoute, saveRoute,
+} from './modules/route.js?v=20261021c';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -202,6 +208,170 @@ function renderStats() {
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------------------------------------------------------------
+// Route builder + Near me (2026-10-21)
+// ---------------------------------------------------------------
+// Tick "Add to route" on a store's panel and it becomes the next numbered
+// stop. Start route opens Google Maps with no origin, so Maps starts from
+// wherever the phone is standing. Optimize reorders by straight-line
+// distance from the current location. The location is only used in the
+// browser for that calculation, never stored or sent anywhere.
+
+let routeStops = loadRoute();
+let nearRows = [];   // [{ acct, miles }] from the last Near me search
+
+function routePositionOf(id) {
+  return routeStops.findIndex((s) => s.id === id) + 1;
+}
+
+function setRouteStatus(msg) {
+  document.getElementById('route-status').textContent = msg || '';
+}
+
+// Returns false when the route is full so the checkbox can revert.
+function toggleRouteStop(acct, wantOn) {
+  const idx = routeStops.findIndex((s) => s.id === acct.id);
+  if (wantOn && idx === -1) {
+    if (routeStops.length >= MAX_STOPS) {
+      setRouteStatus(`A route holds ${MAX_STOPS} stops at most (Google Maps' limit). Remove one to add another.`);
+      return false;
+    }
+    routeStops.push(stopFromAccount(acct));
+  } else if (!wantOn && idx !== -1) {
+    routeStops.splice(idx, 1);
+  }
+  setRouteStatus('');
+  commitRoute();
+  return true;
+}
+
+function commitRoute() {
+  saveRoute(routeStops);
+  renderRouteBar();
+  renderRouteStops(routeStops);
+  renderNearList();
+}
+
+function renderRouteBar() {
+  const bar = document.getElementById('route-bar');
+  bar.hidden = routeStops.length === 0;
+  document.getElementById('route-count').textContent = `${routeStops.length} of ${MAX_STOPS} stops`;
+  document.getElementById('route-list').innerHTML = routeStops.map((s, i) => `
+    <li>
+      <span class="rnum">${i + 1}</span>
+      <span class="rname" title="${escapeHtml(s.query)}">${escapeHtml(s.name)}</span>
+      <button class="rremove" data-id="${escapeHtml(String(s.id))}" aria-label="Remove stop ${i + 1}">&times;</button>
+    </li>`).join('');
+  document.querySelectorAll('#route-list .rremove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      routeStops = routeStops.filter((s) => String(s.id) !== btn.dataset.id);
+      setRouteStatus('');
+      commitRoute();
+    });
+  });
+  document.getElementById('route-optimize').disabled = routeStops.length < 2;
+  document.getElementById('route-start').disabled = routeStops.length === 0;
+}
+
+function getPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('This browser has no location support.')); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      (err) => reject(new Error(err.code === 1
+        ? 'Location access was blocked. Allow it for this site and try again.'
+        : 'Could not get your location.')),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+}
+
+async function optimizeRoute() {
+  if (routeStops.length < 2) return;
+  const btn = document.getElementById('route-optimize');
+  btn.disabled = true;
+  setRouteStatus('Getting your location...');
+  let here = null;
+  let why = '';
+  try { here = await getPosition(); } catch (err) { why = err.message; }
+
+  const identity = routeStops.map((_, i) => i);
+  const before = pathMiles(routeStops, identity, here);
+  routeStops = optimizeOrder(routeStops, here).map((i) => routeStops[i]);
+  const after = pathMiles(routeStops, identity, here);
+  if (here) showUserLocation(here.lat, here.lon);
+  commitRoute();
+  const miles = `${after.toFixed(1)} mi straight-line (was ${before.toFixed(1)})`;
+  setRouteStatus(here
+    ? `Reordered from your location: ${miles}. Real driving distance will differ.`
+    : `${why} Stop 1 stays first. Reordered: ${miles}.`);
+  btn.disabled = routeStops.length < 2;
+}
+
+function startRoute() {
+  const url = googleRouteUrl(routeStops);
+  if (!url) return;
+  // Synthetic anchor click rather than window.open, which some browsers'
+  // popup blockers silently kill (see the MacBane launcher fix, 2026-08-21).
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function renderNearList() {
+  const panel = document.getElementById('near-panel');
+  if (panel.hidden || !nearRows.length) return;
+  const list = document.getElementById('near-list');
+  list.innerHTML = nearRows.map(({ acct, miles }) => `
+    <div class="near-row">
+      <div class="near-info" data-focus="${escapeHtml(String(acct.id))}">
+        <div class="near-name">${escapeHtml(acct.storeName)}</div>
+        <div class="near-sub">${escapeHtml(acct.city)} &middot; ${miles.toFixed(1)} mi</div>
+      </div>
+      <button data-add="${escapeHtml(String(acct.id))}" ${routePositionOf(acct.id) ? 'disabled' : ''}>${routePositionOf(acct.id) ? 'Stop ' + routePositionOf(acct.id) : '+ Route'}</button>
+    </div>`).join('');
+  list.querySelectorAll('[data-focus]').forEach((el) => {
+    el.addEventListener('click', () => focusAccount(nearRows.find((r) => String(r.acct.id) === el.dataset.focus).acct.id));
+  });
+  list.querySelectorAll('[data-add]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = nearRows.find((r) => String(r.acct.id) === btn.dataset.add);
+      if (row) toggleRouteStop(row.acct, true);
+    });
+  });
+}
+
+async function showNearMe() {
+  const panel = document.getElementById('near-panel');
+  const list = document.getElementById('near-list');
+  panel.hidden = false;
+  nearRows = [];
+  list.innerHTML = '<div class="near-msg">Finding you...</div>';
+  let here;
+  try {
+    here = await getPosition();
+  } catch (err) {
+    list.innerHTML = `<div class="near-msg">${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  showUserLocation(here.lat, here.lon);
+  nearRows = visibleAccounts()
+    .filter((a) => a.lat !== null && a.lon !== null && !Object.values(a.skus).some(Boolean))
+    .map((acct) => ({ acct, miles: haversineMiles(here, { lat: acct.lat, lon: acct.lon }) }))
+    .sort((x, y) => x.miles - y.miles)
+    .slice(0, 10);
+  if (!nearRows.length) {
+    list.innerHTML = '<div class="near-msg">No unsold accounts with a map point in the current view.</div>';
+    return;
+  }
+  renderNearList();
+  fitToPoints([[here.lat, here.lon], ...nearRows.map((r) => [r.acct.lat, r.acct.lon])]);
 }
 
 // ---------------------------------------------------------------
@@ -546,10 +716,26 @@ async function main() {
   // pins vanish on zoom-out before: a stray click set an invisible county
   // filter, and zooming back out kept showing just that one county instead
   // of everything, with no on-screen sign the filter was even active.
-  await initMap('leaflet-map', { onCountyClickFn: (name) => { flyToCounty(name, { onlyZoomIn: true }); } });
+  await initMap('leaflet-map', {
+    onCountyClickFn: (name) => { flyToCounty(name, { onlyZoomIn: true }); },
+    onRouteToggleFn: toggleRouteStop,
+    routePositionFn: routePositionOf,
+  });
   await loadAll();
   await recomputeMatches();
   render();
+  renderRouteBar();
+  renderRouteStops(routeStops);
+
+  document.getElementById('near-me-btn').addEventListener('click', showNearMe);
+  document.getElementById('near-close').addEventListener('click', () => { document.getElementById('near-panel').hidden = true; });
+  document.getElementById('route-optimize').addEventListener('click', optimizeRoute);
+  document.getElementById('route-start').addEventListener('click', startRoute);
+  document.getElementById('route-clear').addEventListener('click', () => {
+    routeStops = [];
+    setRouteStatus('');
+    commitRoute();
+  });
 
   // Andrew, 2026-08-21: mobile-only off-canvas sidebar (see app.css's
   // max-width:820px block) -- toggle button opens/closes it, tapping the
