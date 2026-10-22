@@ -1,18 +1,18 @@
-import * as db from './core/db.js?v=20261022b';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261022b';
-import { buildMatches } from './data/matcher.js?v=20261022b';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261022b';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261022b';
+import * as db from './core/db.js?v=20261022c';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261022c';
+import { buildMatches } from './data/matcher.js?v=20261022c';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261022c';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261022c';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
-  renderRouteStops, showUserLocation, fitToPoints, focusAccount,
-} from './modules/mapView.js?v=20261022b';
+  renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible,
+} from './modules/mapView.js?v=20261022c';
 import {
-  HEAT_STOPS, countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261022b';
+  countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
+} from './modules/heatmap.js?v=20261022c';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261022b';
+} from './modules/route.js?v=20261022c';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -45,6 +45,7 @@ const state = {
   gapMissing: null,
   filterCounty: '',
   heatMode: loadHeatMode(), // 'sold' (penetration) | 'total' | 'avg' (volume heatmap)
+  dotsOn: loadDotsOn(),     // account dots drawn on the map
 };
 
 function brandsById() {
@@ -142,6 +143,7 @@ function render() {
   renderHeatBar(note, brand, heat);
   renderChoropleth(countyStatsFor(accts), heat);
   renderPins(accts.filter((a) => a.lat !== null), brandsById());
+  setPinsVisible(state.dotsOn);
 }
 
 // ---------------------------------------------------------------
@@ -182,22 +184,26 @@ function computeHeat(accts) {
 
 function renderHeatBar(note, brand, heat) {
   const bar = document.getElementById('heat-bar');
-  const wasHidden = bar.hidden;
   bar.hidden = state.brands.length === 0;
   const modes = [['sold', 'Sold %'], ['total', 'Volume total'], ['avg', 'Volume per account']];
+  const bandLabel = (l) => (l.min === l.max ? formatAmount(l.min) : `${formatAmount(l.min)} to ${formatAmount(l.max)}`);
   const legend = heat
-    ? `<span class="heat-legend" title="Darker means more. Shading is on a square-root scale so one big county does not wash out the rest.">
-         <span class="heat-low">0</span>
-         <span class="heat-ramp" style="background:linear-gradient(90deg, ${HEAT_STOPS.join(', ')})"></span>
-         <span class="heat-high">${formatAmount(heat.max)}</span>
-       </span>`
+    ? `<span class="heat-legend" title="Darker means more. Counties are sorted into up to 7 bands holding about the same number of counties each, so the colors stay distinct.">`
+      + heat.legend.map((l) => `<span class="heat-band"><i style="background:${l.color}"></i>${bandLabel(l)}</span>`).join('')
+      + '</span>'
     : '';
+  const dotsBtn = `<button class="heat-btn" id="dots-btn" aria-pressed="${state.dotsOn}" title="Show or hide the account dots so only the county shading shows">Dots: ${state.dotsOn ? 'on' : 'off'}</button>`;
   const skuBtn = state.heatMode !== 'sold' && brand && heat
     ? '<button class="heat-btn sku-btn" id="sku-btn" aria-haspopup="dialog">SKUs</button>' : '';
   bar.innerHTML = `<span class="heat-label">Shade</span>`
     + modes.map(([m, label]) => `<button class="heat-btn${state.heatMode === m ? ' on' : ''}" data-mode="${m}" aria-pressed="${state.heatMode === m}">${label}</button>`).join('')
-    + skuBtn + legend
+    + dotsBtn + skuBtn + legend
     + (note ? `<span class="heat-note">${escapeHtml(note)}</span>` : '');
+  document.getElementById('dots-btn').addEventListener('click', () => {
+    state.dotsOn = !state.dotsOn;
+    saveDotsOn(state.dotsOn);
+    render();
+  });
   bar.querySelectorAll('[data-mode]').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.heatMode = btn.dataset.mode;
@@ -209,7 +215,9 @@ function renderHeatBar(note, brand, heat) {
   const sb = document.getElementById('sku-btn');
   if (sb) sb.addEventListener('click', () => toggleSkuPanel(brand));
   if (skuPanelBrandId && (!brand || brand.id !== skuPanelBrandId || state.heatMode === 'sold')) closeSkuPanel();
-  if (wasHidden !== bar.hidden && getMap()) getMap().invalidateSize();
+  // The bar can change height (the legend wraps on a narrow window), so the map
+  // re-measures every time, not only when the bar appears.
+  if (getMap()) getMap().invalidateSize();
 }
 
 function closeSkuPanel() {

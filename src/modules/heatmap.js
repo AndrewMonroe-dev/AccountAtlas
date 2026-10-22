@@ -11,30 +11,44 @@ const SKU_OFF_KEY = 'aa-heat-skus-v1';
 
 export const HEAT_MODES = ['sold', 'total', 'avg'];
 
-// Low to high. Evenly spaced stops, light yellow to dark red-brown.
-export const HEAT_STOPS = ['#fbeec1', '#efb24a', '#c9531a', '#6b1d07'];
+// Seven clearly different shades, palest to darkest. Counties are sorted into
+// bands (not shaded on a smooth scale) so neighbouring totals still get
+// colors you can tell apart.
+export const HEAT_PALETTE = ['#fff1b8', '#fbd05a', '#f7a23a', '#ee6a24', '#d2321f', '#9a1414', '#4d0a0a'];
+// A county with accounts but no volume in the chosen SKUs.
+export const HEAT_ZERO_COLOR = '#e4dfd3';
 
-function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-// t in 0..1 -> color along HEAT_STOPS.
-export function heatColor(t) {
-  const x = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0)) * (HEAT_STOPS.length - 1);
-  const i = Math.min(HEAT_STOPS.length - 2, Math.floor(x));
-  const f = x - i;
-  const a = hexToRgb(HEAT_STOPS[i]);
-  const b = hexToRgb(HEAT_STOPS[i + 1]);
-  const c = a.map((v, k) => Math.round(v + (b[k] - v) * f));
-  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
-}
-
-// Colors use a square-root scale so one huge county does not turn every other
-// county the palest shade.
-export function heatShade(value, max) {
-  if (!(max > 0) || !(value > 0)) return heatColor(0);
-  return heatColor(Math.sqrt(value / max));
+// Splits county values into up to 7 bands holding about the same number of
+// counties each. Equal values always share a band. Returns
+// { colorFor(value), legend: [{ color, min, max }] } with legend palest first,
+// preceded by a zero entry when any county has none.
+export function heatBands(valueList) {
+  const positives = valueList.filter((v) => v > 0).sort((x, y) => x - y);
+  const n = positives.length;
+  const distinct = [...new Set(positives)];
+  const k = Math.min(HEAT_PALETTE.length, distinct.length);
+  const bandOfValue = new Map();
+  distinct.forEach((v) => {
+    const first = positives.indexOf(v);
+    bandOfValue.set(v, Math.min(k - 1, Math.floor((first * k) / n)));
+  });
+  // Spread the bands over the whole palette so the extremes use the palest
+  // and darkest shades even with only a few bands.
+  const colorOfBand = (band) => HEAT_PALETTE[k <= 1 ? 0 : Math.round((band * (HEAT_PALETTE.length - 1)) / (k - 1))];
+  const ranges = new Map();
+  distinct.forEach((v) => {
+    const band = bandOfValue.get(v);
+    const r = ranges.get(band) || { color: colorOfBand(band), min: v, max: v };
+    r.min = Math.min(r.min, v);
+    r.max = Math.max(r.max, v);
+    ranges.set(band, r);
+  });
+  const legend = [...ranges.keys()].sort((x, y) => x - y).map((b) => ranges.get(b));
+  if (valueList.some((v) => !(v > 0))) legend.unshift({ color: HEAT_ZERO_COLOR, min: 0, max: 0 });
+  return {
+    legend,
+    colorFor: (value) => (value > 0 && bandOfValue.has(value) ? colorOfBand(bandOfValue.get(value)) : HEAT_ZERO_COLOR),
+  };
 }
 
 export function accountVolume(acct, skuSet) {
@@ -45,7 +59,7 @@ export function accountVolume(acct, skuSet) {
 }
 
 // accounts: one brand's accounts. skuSet: Set of SKU names to count.
-// Returns { values: Map<county, {volume, accounts, value}>, max }.
+// Returns { values: Map<county, {volume, accounts, value}>, max, measure, colorFor, legend }.
 export function countyHeat(accounts, skuSet, measure) {
   const values = new Map();
   accounts.forEach((a) => {
@@ -60,7 +74,8 @@ export function countyHeat(accounts, skuSet, measure) {
     v.value = measure === 'avg' ? (v.accounts ? v.volume / v.accounts : 0) : v.volume;
     if (v.value > max) max = v.value;
   });
-  return { values, max, measure };
+  const bands = heatBands([...values.values()].map((v) => v.value));
+  return { values, max, measure, colorFor: bands.colorFor, legend: bands.legend };
 }
 
 export function formatAmount(n) {
@@ -81,6 +96,15 @@ export function loadHeatMode() {
 
 export function saveHeatMode(mode) {
   try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage blocked */ }
+}
+
+// Whether the account dots are drawn. On unless the user turned them off.
+export function loadDotsOn() {
+  try { return localStorage.getItem('aa-dots-v1') !== 'off'; } catch { return true; }
+}
+
+export function saveDotsOn(on) {
+  try { localStorage.setItem('aa-dots-v1', on ? 'on' : 'off'); } catch { /* storage blocked */ }
 }
 
 function loadSkuOffAll() {

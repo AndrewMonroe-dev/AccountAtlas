@@ -2,7 +2,7 @@
 // Both live on the same map instance; Leaflet's own zoom handles the
 // transition, no separate "view mode" toggle needed once real tiles are in.
 
-import { heatShade, formatAmount } from './heatmap.js?v=20261022b';
+import { formatAmount } from './heatmap.js?v=20261022c';
 
 let map = null;
 let countyLayer = null;
@@ -17,6 +17,7 @@ const MI_ZOOM = 6;
 const PIN_TOLERANCE_PX = 22;
 const COUNTY_FIT_PADDING = [40, 40];
 let pinEntries = [];
+let pinsVisible = true;
 let routeLayer = null;
 let userLayer = null;
 let onRouteToggle = null;   // (acct, wantOn) => boolean, false = refused
@@ -104,8 +105,8 @@ function countyColor(pct) {
 // countyStats: Map<countyName, {sold, total}> -- countyName as typed in
 // the source Excel, not necessarily matching the map's own spelling.
 // heat (optional, volume heatmap): { values: Map<countyName, {volume, accounts,
-// value}>, max } -- when given, counties are shaded by value instead of by
-// sold percentage.
+// value}>, colorFor(value) } -- when given, counties are shaded by value
+// instead of by sold percentage.
 export function renderChoropleth(countyStats, heat = null) {
   if (countyLayer) { map.removeLayer(countyLayer); }
 
@@ -121,8 +122,8 @@ export function renderChoropleth(countyStats, heat = null) {
         return {
           color: 'var(--line)',
           weight: 1,
-          fillColor: h ? heatShade(h.value, heat.max) : 'transparent',
-          fillOpacity: h ? 0.7 : 0.05,
+          fillColor: h ? heat.colorFor(h.value) : 'transparent',
+          fillOpacity: h ? 0.85 : 0.05,
         };
       }
       const stats = normalizedStats.get(normalizeCountyName(feature.properties.name));
@@ -206,11 +207,21 @@ export function renderPins(accounts, brandsById) {
   redrawNearby();
 }
 
+// Dots on/off (2026-10-22): hides every account pin and cluster so only the
+// county shading shows. Route badges and nearby businesses are separate layers
+// and stay.
+export function setPinsVisible(on) {
+  pinsVisible = on;
+  if (!map || !clusterGroup) return;
+  if (on && !map.hasLayer(clusterGroup)) map.addLayer(clusterGroup);
+  if (!on && map.hasLayer(clusterGroup)) { map.removeLayer(clusterGroup); hideDetailPanel(); }
+}
+
 // Closest pin that is actually drawn on screen (not folded into a cluster;
 // circle markers have no _icon so getVisibleParent cannot be used here)
 // within PIN_TOLERANCE_PX of a container point, or null.
 function nearestPin(containerPoint) {
-  if (!map || !clusterGroup || !containerPoint) return null;
+  if (!map || !clusterGroup || !containerPoint || !pinsVisible) return null;
   let best = null;
   let bestDist = PIN_TOLERANCE_PX;
   for (const entry of pinEntries) {
@@ -586,7 +597,7 @@ function pickNearbyLabels(places) {
   });
   const bounds = map.getBounds().pad(0.1);
   pinEntries.forEach((e) => {
-    if (!bounds.contains([e.acct.lat, e.acct.lon])) return;
+    if (!pinsVisible || !bounds.contains([e.acct.lat, e.acct.lon])) return;
     const pt = map.latLngToContainerPoint([e.acct.lat, e.acct.lon]);
     taken.push({ x: pt.x - 10, y: pt.y - 10, w: 20, h: 20 });
   });
