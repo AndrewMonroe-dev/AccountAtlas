@@ -24,6 +24,9 @@ let currentPanel = null;    // { acct, brand } currently shown in the detail pan
 // pins on the way to the "Add to route" checkbox would swap the content out
 // from under the cursor.
 let panelPinned = false;
+let onPlaceToggle = null;   // (place, wantOn) => boolean, false = refused
+let placePosition = null;   // (place) => 1-based stop number, 0 if none
+let openPlace = null;       // gray business whose popup is open, { place, marker }
 
 // County names typed into a real Excel by a real person rarely match the
 // map's canonical Census spelling exactly -- "St. Clair" vs "Saint Clair"
@@ -40,10 +43,14 @@ function normalizeCountyName(name) {
     .trim();
 }
 
-export async function initMap(containerId, { onCountyClickFn, onRouteToggleFn, routePositionFn } = {}) {
+export async function initMap(containerId, {
+  onCountyClickFn, onRouteToggleFn, routePositionFn, onPlaceToggleFn, placePositionFn,
+} = {}) {
   onCountyClick = onCountyClickFn || null;
   onRouteToggle = onRouteToggleFn || null;
   routePosition = routePositionFn || null;
+  onPlaceToggle = onPlaceToggleFn || null;
+  placePosition = placePositionFn || null;
 
   detailPanel = document.getElementById('detail-panel');
   detailBody = document.getElementById('detail-body');
@@ -64,6 +71,7 @@ export async function initMap(containerId, { onCountyClickFn, onRouteToggleFn, r
   });
 
   initNearby();
+  wirePlacePopups();
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -261,10 +269,12 @@ export function renderRouteStops(stops) {
       L.DomEvent.stopPropagation(e);
       const entry = pinEntries.find((p) => p.acct.id === s.id);
       if (entry) showDetailPanel(entry.acct, entry.brand, { pin: true });
+      else if (s.kind === 'place') { hideDetailPanel(); openPlacePopupAt(s); }
     });
     badge.addTo(routeLayer);
   });
   refreshRouteCheckbox();
+  refreshPlaceButton();
 }
 
 export function showUserLocation(lat, lon) {
@@ -505,6 +515,9 @@ function nearbyPlacesIn(bounds) {
 // NEARBY_MAX markers, so the DOM stays small in a dense city.
 function redrawNearby() {
   if (!map || !nearbyLayer) return;
+  // Clearing the layer closes an open popup. Adding a stop can resize the map
+  // (the route bar appears), which redraws this layer, so reopen that popup.
+  const keepOpen = openPlace ? openPlace.place : null;
   nearbyLayer.clearLayers();
   nearbyDenseMsg = '';
   if (!nearbyOn || map.getZoom() < NEARBY_MIN_ZOOM || !nearbyData) { syncNearby(); return; }
@@ -527,11 +540,13 @@ function redrawNearby() {
     });
     const marker = L.marker([p.lat, p.lon], { icon, zIndexOffset: -500, title: p.name });
     marker.bindPopup(nearbyPopupHtml(p));
+    marker.getPopup()._place = p;
     marker.on('click', (e) => {
       L.DomEvent.stopPropagation(e);
       hideDetailPanel();
     });
     marker.addTo(nearbyLayer);
+    if (keepOpen && keepOpen.lat === p.lat && keepOpen.lon === p.lon && keepOpen.name === p.name) marker.openPopup();
   });
 }
 
@@ -577,12 +592,54 @@ function nearbyAsOfText() {
   return `OpenStreetMap data${when ? ' as of ' + escapeHtml(when) : ''}`;
 }
 
+// Popups for gray businesses carry their place in `_place`: opened from the
+// gray marker, or from the route badge sitting on top of it. Wires the button.
+function wirePlacePopups() {
+  map.on('popupopen', (e) => {
+    const p = e.popup._place;
+    if (!p) return;
+    openPlace = { place: p, popup: e.popup };
+    const btn = e.popup.getElement().querySelector('.nearby-route');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        const on = placePosition ? placePosition(p) > 0 : false;
+        if (onPlaceToggle) onPlaceToggle(p, !on);
+        refreshPlaceButton();
+      });
+    }
+    refreshPlaceButton();
+  });
+  map.on('popupclose', (e) => { if (openPlace && openPlace.popup === e.popup) openPlace = null; });
+}
+
+// The route badge sits on top of its gray marker, so a tap on the badge of a
+// gray-business stop opens that business's popup (where it can be removed).
+function openPlacePopupAt(stop) {
+  const place = { name: stop.name, label: stop.label || '', addr: stop.addr || '', lat: stop.lat, lon: stop.lon };
+  const popup = L.popup().setLatLng([stop.lat, stop.lon]).setContent(nearbyPopupHtml(place));
+  popup._place = place;
+  popup.openOn(map);
+}
+
+// Keeps the open gray-business popup's route button in step with the route,
+// e.g. after the stop is removed from the route bar.
+function refreshPlaceButton() {
+  if (!openPlace) return;
+  const popup = openPlace.popup;
+  const btn = popup.getElement() && popup.getElement().querySelector('.nearby-route');
+  if (!btn) return;
+  const n = placePosition ? placePosition(openPlace.place) : 0;
+  btn.textContent = n > 0 ? `Stop ${n} · Remove from route` : 'Add to route';
+  btn.classList.toggle('on', n > 0);
+}
+
 function nearbyPopupHtml(p) {
   const link = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
   return `<div class="map-popup nearby-popup">
       <div class="pname">${escapeHtml(p.name)}</div>
       <div class="paddr">${escapeHtml(p.label)}${p.addr ? ' &middot; ' + escapeHtml(p.addr) : ''}</div>
       <div class="fam">Not in your lists</div>
+      <button type="button" class="nearby-route">Add to route</button>
       <div class="nearby-asof">${nearbyAsOfText()}</div>
       <a class="nearby-link" href="${link}" target="_blank" rel="noopener">Open in Google Maps</a>
     </div>`;

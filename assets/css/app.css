@@ -171,6 +171,7 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700;
 }
 .route-list .rname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-list .rtag { font-style: normal; font-size: 10.5px; color: var(--ink-dim); margin-left: 4px; }
 .route-list .rremove { border: none; background: none; color: var(--ink-dim); font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 8px; }
 .route-list .rremove:hover { color: var(--unsold); }
 .route-status { font-size: 11px; color: var(--ink-dim); }

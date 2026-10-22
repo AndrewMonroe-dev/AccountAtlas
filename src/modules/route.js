@@ -2,7 +2,8 @@
 // and no Leaflet in here so the ordering math can be tested on its own.
 //
 // A route is an ordered array of stops: { id, name, lat, lon, query } where
-// query is the address text handed to Google Maps.
+// query is descriptive text for the route bar. A stop that is a nearby
+// business rather than one of the user's accounts also has kind: 'place'.
 
 export const MAX_STOPS = 10; // Google Maps URLs take 9 waypoints + 1 destination
 const STORAGE_KEY = 'aa-route-v1';
@@ -104,6 +105,19 @@ export function stopFromAccount(acct) {
   const query = [acct.address, acct.city, `${acct.state || 'MI'} ${acct.zip || ''}`.trim()]
     .filter(Boolean).join(', ');
   return { id: acct.id, name: acct.storeName, lat: acct.lat, lon: acct.lon, query };
+}
+
+// A gray "nearby business" from the OSM snapshot, which is not one of the
+// user's accounts. The id is built from the coordinates so it can never clash
+// with an account id and stays stable when the snapshot is rebuilt. The name is
+// part of it because two businesses can share one coordinate (same building).
+export function placeStopId(place) {
+  return `osm:${place.lat.toFixed(6)},${place.lon.toFixed(6)}:${place.name}`;
+}
+
+export function stopFromPlace(place) {
+  const query = [place.label, place.addr].filter(Boolean).join(', ');
+  return { id: placeStopId(place), name: place.name, lat: place.lat, lon: place.lon, query, kind: 'place', label: place.label, addr: place.addr || '' };
 }
 
 export function loadRoute() {

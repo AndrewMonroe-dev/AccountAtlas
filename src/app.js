@@ -1,15 +1,15 @@
-import * as db from './core/db.js?v=20261021k';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261021k';
-import { buildMatches } from './data/matcher.js?v=20261021k';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261021k';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261021k';
+import * as db from './core/db.js?v=20261022a';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261022a';
+import { buildMatches } from './data/matcher.js?v=20261022a';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261022a';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261022a';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount,
-} from './modules/mapView.js?v=20261021k';
+} from './modules/mapView.js?v=20261022a';
 import {
-  MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, loadRoute, saveRoute,
-} from './modules/route.js?v=20261021k';
+  MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
+} from './modules/route.js?v=20261022a';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -292,20 +292,33 @@ function setRouteStatus(msg) {
 }
 
 // Returns false when the route is full so the checkbox can revert.
-function toggleRouteStop(acct, wantOn) {
-  const idx = routeStops.findIndex((s) => s.id === acct.id);
+function toggleStop(id, wantOn, makeStop) {
+  const idx = routeStops.findIndex((s) => s.id === id);
   if (wantOn && idx === -1) {
     if (routeStops.length >= MAX_STOPS) {
       setRouteStatus(`A route holds ${MAX_STOPS} stops at most (Google Maps' limit). Remove one to add another.`);
       return false;
     }
-    routeStops.push(stopFromAccount(acct));
+    routeStops.push(makeStop());
   } else if (!wantOn && idx !== -1) {
     routeStops.splice(idx, 1);
   }
   setRouteStatus('');
   commitRoute();
   return true;
+}
+
+function toggleRouteStop(acct, wantOn) {
+  return toggleStop(acct.id, wantOn, () => stopFromAccount(acct));
+}
+
+// A gray nearby business (not one of the user's accounts) added from its popup.
+function toggleRoutePlace(place, wantOn) {
+  return toggleStop(placeStopId(place), wantOn, () => stopFromPlace(place));
+}
+
+function routePositionOfPlace(place) {
+  return routePositionOf(placeStopId(place));
 }
 
 function commitRoute() {
@@ -322,7 +335,7 @@ function renderRouteBar() {
   document.getElementById('route-list').innerHTML = routeStops.map((s, i) => `
     <li>
       <span class="rnum">${i + 1}</span>
-      <span class="rname" title="${escapeHtml(s.query)}">${escapeHtml(s.name)}</span>
+      <span class="rname" title="${escapeHtml(s.query)}">${escapeHtml(s.name)}${s.kind === 'place' ? ` <em class="rtag">${escapeHtml(s.label ? s.label + ', ' : '')}not an account</em>` : ''}</span>
       <button class="rremove" data-id="${escapeHtml(String(s.id))}" aria-label="Remove stop ${i + 1}">&times;</button>
     </li>`).join('');
   document.querySelectorAll('#route-list .rremove').forEach((btn) => {
@@ -810,6 +823,8 @@ async function main() {
     onCountyClickFn: (name) => { flyToCounty(name, { onlyZoomIn: true }); },
     onRouteToggleFn: toggleRouteStop,
     routePositionFn: routePositionOf,
+    onPlaceToggleFn: toggleRoutePlace,
+    placePositionFn: routePositionOfPlace,
   });
   await loadAll();
   // A launch with every list remembered as off would open to a blank map.
