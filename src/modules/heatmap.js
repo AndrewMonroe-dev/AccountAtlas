@@ -98,6 +98,15 @@ export function saveHeatMode(mode) {
   try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage blocked */ }
 }
 
+// Whether the county shading is drawn at all. On unless the user turned it off.
+export function loadHeatOn() {
+  try { return localStorage.getItem('aa-heatshade-v1') !== 'off'; } catch { return true; }
+}
+
+export function saveHeatOn(on) {
+  try { localStorage.setItem('aa-heatshade-v1', on ? 'on' : 'off'); } catch { /* storage blocked */ }
+}
+
 // Whether the account dots are drawn. On unless the user turned them off.
 export function loadDotsOn() {
   try { return localStorage.getItem('aa-dots-v1') !== 'off'; } catch { return true; }

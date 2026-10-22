@@ -2,7 +2,7 @@
 // Both live on the same map instance; Leaflet's own zoom handles the
 // transition, no separate "view mode" toggle needed once real tiles are in.
 
-import { formatAmount } from './heatmap.js?v=20261022c';
+import { formatAmount } from './heatmap.js?v=20261022d';
 
 let map = null;
 let countyLayer = null;
@@ -107,7 +107,9 @@ function countyColor(pct) {
 // heat (optional, volume heatmap): { values: Map<countyName, {volume, accounts,
 // value}>, colorFor(value) } -- when given, counties are shaded by value
 // instead of by sold percentage.
-export function renderChoropleth(countyStats, heat = null) {
+// shadeOn false: no shading at all (the "Heat: off" toggle), counties are
+// see-through outlines that still show tooltips and take clicks.
+export function renderChoropleth(countyStats, heat = null, shadeOn = true) {
   if (countyLayer) { map.removeLayer(countyLayer); }
 
   const normalizedStats = new Map();
@@ -117,6 +119,9 @@ export function renderChoropleth(countyStats, heat = null) {
 
   countyLayer = L.geoJSON(countyGeoJson, {
     style: (feature) => {
+      if (!shadeOn) {
+        return { color: 'var(--line)', weight: 1, fillColor: 'transparent', fillOpacity: 0.05 };
+      }
       if (heat) {
         const h = normalizedHeat.get(normalizeCountyName(feature.properties.name));
         return {
