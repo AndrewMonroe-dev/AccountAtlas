@@ -2,6 +2,8 @@
 // Both live on the same map instance; Leaflet's own zoom handles the
 // transition, no separate "view mode" toggle needed once real tiles are in.
 
+import { heatShade, formatAmount } from './heatmap.js?v=20261022b';
+
 let map = null;
 let countyLayer = null;
 let clusterGroup = null;
@@ -101,14 +103,28 @@ function countyColor(pct) {
 
 // countyStats: Map<countyName, {sold, total}> -- countyName as typed in
 // the source Excel, not necessarily matching the map's own spelling.
-export function renderChoropleth(countyStats) {
+// heat (optional, volume heatmap): { values: Map<countyName, {volume, accounts,
+// value}>, max } -- when given, counties are shaded by value instead of by
+// sold percentage.
+export function renderChoropleth(countyStats, heat = null) {
   if (countyLayer) { map.removeLayer(countyLayer); }
 
   const normalizedStats = new Map();
   countyStats.forEach((v, k) => normalizedStats.set(normalizeCountyName(k), v));
+  const normalizedHeat = new Map();
+  if (heat) heat.values.forEach((v, k) => normalizedHeat.set(normalizeCountyName(k), v));
 
   countyLayer = L.geoJSON(countyGeoJson, {
     style: (feature) => {
+      if (heat) {
+        const h = normalizedHeat.get(normalizeCountyName(feature.properties.name));
+        return {
+          color: 'var(--line)',
+          weight: 1,
+          fillColor: h ? heatShade(h.value, heat.max) : 'transparent',
+          fillOpacity: h ? 0.7 : 0.05,
+        };
+      }
       const stats = normalizedStats.get(normalizeCountyName(feature.properties.name));
       const pct = stats && stats.total ? stats.sold / stats.total : null;
       return {
@@ -121,9 +137,12 @@ export function renderChoropleth(countyStats) {
     onEachFeature: (feature, layer) => {
       const name = feature.properties.name;
       const stats = normalizedStats.get(normalizeCountyName(name));
-      const label = stats
-        ? `<strong>${name} County</strong><br>${stats.sold} of ${stats.total} accounts sold`
-        : `<strong>${name} County</strong><br>no accounts loaded`;
+      const h = heat ? normalizedHeat.get(normalizeCountyName(name)) : null;
+      const label = h
+        ? `<strong>${name} County</strong><br>${formatAmount(h.volume)} total &middot; ${h.accounts} account${h.accounts === 1 ? '' : 's'}<br>${formatAmount(h.accounts ? h.volume / h.accounts : 0)} per account`
+        : (stats
+          ? `<strong>${name} County</strong><br>${stats.sold} of ${stats.total} accounts sold`
+          : `<strong>${name} County</strong><br>no accounts loaded`);
       layer.bindTooltip(label, { sticky: true, className: 'county-tooltip' });
       // Fat-finger friendly: a click that just misses a pin lands on the county
       // underneath. If a visible pin is within reach, open it instead of

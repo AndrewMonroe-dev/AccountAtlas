@@ -2,7 +2,8 @@
 //
 // Fixed columns A-G: Store Full Name, Store Number, Store Address, City,
 // County, State, Zip Code. Every column from H onward is a SKU. A cell is
-// SOLD if it holds anything other than "-" or blank; otherwise UNSOLD.
+// SOLD if it holds anything other than "-" or blank; otherwise UNSOLD. The
+// cell's amount is also kept (qty) for the volume heatmap.
 
 const FIXED_COLS = [
   'storeName', 'storeNumber', 'address', 'city', 'county', 'state', 'zip',
@@ -17,6 +18,14 @@ function isSold(cellValue) {
   const v = normalizeCell(cellValue);
   if (v === '' || v === '-') return false;
   return true;
+}
+
+// The amount in a SKU cell, for the volume heatmap. Numbers as typed, text like
+// "1,234" or "$480" cleaned, anything else (blank, "-", a marker) counts as 0.
+function parseQty(cellValue) {
+  if (typeof cellValue === 'number') return Number.isFinite(cellValue) ? cellValue : 0;
+  const cleaned = normalizeCell(cellValue).replace(/[$,\s]/g, '');
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(cleaned) ? parseFloat(cleaned) : 0;
 }
 
 function makeAccountId(brandId, storeNumber, storeName, address) {
@@ -102,8 +111,10 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId, { previousById 
     }
 
     const skus = {};
+    const qty = {};
     skuNames.forEach((sku, i) => {
       skus[sku] = isSold(row[skuColOffset + i]);
+      qty[sku] = parseQty(row[skuColOffset + i]);
     });
 
     const id = makeAccountId(brandId, rec.storeNumber, rec.storeName, rec.address);
@@ -134,6 +145,7 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId, { previousById 
       state: rec.state || 'MI',
       zip: rec.zip,
       skus,
+      qty, // amount per SKU, same keys as skus (absent on lists stored before 2026-10-22)
       lat,
       lon,
       geocodeStatus, // pending | ok | failed | manual

@@ -1,15 +1,18 @@
-import * as db from './core/db.js?v=20261022a';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261022a';
-import { buildMatches } from './data/matcher.js?v=20261022a';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261022a';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261022a';
+import * as db from './core/db.js?v=20261022b';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261022b';
+import { buildMatches } from './data/matcher.js?v=20261022b';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261022b';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261022b';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount,
-} from './modules/mapView.js?v=20261022a';
+} from './modules/mapView.js?v=20261022b';
+import {
+  HEAT_STOPS, countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadSkuOff, saveSkuOff,
+} from './modules/heatmap.js?v=20261022b';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261022a';
+} from './modules/route.js?v=20261022b';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -41,6 +44,7 @@ const state = {
   gapHas: null,
   gapMissing: null,
   filterCounty: '',
+  heatMode: loadHeatMode(), // 'sold' (penetration) | 'total' | 'avg' (volume heatmap)
 };
 
 function brandsById() {
@@ -134,8 +138,113 @@ function render() {
   renderStats();
   renderUnmappedBadge();
   const accts = visibleAccounts();
-  renderChoropleth(countyStatsFor(accts));
+  const { heat, note, brand } = computeHeat(accts);
+  renderHeatBar(note, brand, heat);
+  renderChoropleth(countyStatsFor(accts), heat);
   renderPins(accts.filter((a) => a.lat !== null), brandsById());
+}
+
+// ---------------------------------------------------------------
+// Volume heatmap (2026-10-22)
+// ---------------------------------------------------------------
+// Shades counties by one brand's volume instead of sold percentage. The brand
+// is the first list that is switched on. Total = sum of the chosen SKUs'
+// amounts in the county, Per account = that total over the brand's accounts
+// in the county. Lists stored before 2026-10-22 have no amounts and need a
+// re-upload.
+
+let skuPanelBrandId = null; // brand whose SKU panel is open, or null
+
+function heatBrand() {
+  return state.brands.find((b) => state.activeBrandIds.has(b.id)) || null;
+}
+
+function heatSkuSet(brand) {
+  const off = loadSkuOff(brand.id);
+  return new Set((brand.skuList || []).filter((s) => !off.has(s)));
+}
+
+function computeHeat(accts) {
+  if (state.heatMode === 'sold') return { heat: null, note: '', brand: null };
+  const brand = heatBrand();
+  if (!brand) return { heat: null, note: 'Turn a list on to see its volume.', brand: null };
+  const mine = accts.filter((a) => a.brandId === brand.id);
+  if (!mine.some((a) => a.qty)) {
+    return { heat: null, brand, note: `Showing sold % for now. Re-upload "${brand.name}" to see volume (the stored list only has sold or unsold).` };
+  }
+  const skus = heatSkuSet(brand);
+  const heat = countyHeat(mine, skus, state.heatMode);
+  const total = (brand.skuList || []).length;
+  const parts = [`${brand.name}`, `${skus.size} of ${total} SKUs`];
+  if (state.activeBrandIds.size > 1) parts.push(`first of ${state.activeBrandIds.size} lists on, turn the others off to pick another`);
+  return { heat, brand, note: parts.join(' · ') };
+}
+
+function renderHeatBar(note, brand, heat) {
+  const bar = document.getElementById('heat-bar');
+  const wasHidden = bar.hidden;
+  bar.hidden = state.brands.length === 0;
+  const modes = [['sold', 'Sold %'], ['total', 'Volume total'], ['avg', 'Volume per account']];
+  const legend = heat
+    ? `<span class="heat-legend" title="Darker means more. Shading is on a square-root scale so one big county does not wash out the rest.">
+         <span class="heat-low">0</span>
+         <span class="heat-ramp" style="background:linear-gradient(90deg, ${HEAT_STOPS.join(', ')})"></span>
+         <span class="heat-high">${formatAmount(heat.max)}</span>
+       </span>`
+    : '';
+  const skuBtn = state.heatMode !== 'sold' && brand && heat
+    ? '<button class="heat-btn sku-btn" id="sku-btn" aria-haspopup="dialog">SKUs</button>' : '';
+  bar.innerHTML = `<span class="heat-label">Shade</span>`
+    + modes.map(([m, label]) => `<button class="heat-btn${state.heatMode === m ? ' on' : ''}" data-mode="${m}" aria-pressed="${state.heatMode === m}">${label}</button>`).join('')
+    + skuBtn + legend
+    + (note ? `<span class="heat-note">${escapeHtml(note)}</span>` : '');
+  bar.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.heatMode = btn.dataset.mode;
+      saveHeatMode(state.heatMode);
+      closeSkuPanel();
+      render();
+    });
+  });
+  const sb = document.getElementById('sku-btn');
+  if (sb) sb.addEventListener('click', () => toggleSkuPanel(brand));
+  if (skuPanelBrandId && (!brand || brand.id !== skuPanelBrandId || state.heatMode === 'sold')) closeSkuPanel();
+  if (wasHidden !== bar.hidden && getMap()) getMap().invalidateSize();
+}
+
+function closeSkuPanel() {
+  skuPanelBrandId = null;
+  document.getElementById('sku-panel').hidden = true;
+}
+
+function toggleSkuPanel(brand) {
+  if (skuPanelBrandId === brand.id) { closeSkuPanel(); return; }
+  skuPanelBrandId = brand.id;
+  const panel = document.getElementById('sku-panel');
+  const skus = brand.skuList || [];
+  panel.innerHTML = `
+    <div class="sku-head"><strong>SKUs counted</strong> <span id="sku-count"></span>
+      <button class="near-close" id="sku-close" aria-label="Close">&times;</button></div>
+    <div class="sku-actions"><button class="ghost-btn" id="sku-all">All</button><button class="ghost-btn" id="sku-none">None</button></div>
+    <div class="sku-list">${skus.map((s, i) => `<label class="sku-row"><input type="checkbox" data-i="${i}"> <span>${escapeHtml(s)}</span></label>`).join('')}</div>`;
+  const boxes = [...panel.querySelectorAll('input[type="checkbox"]')];
+  const sync = () => {
+    const off = loadSkuOff(brand.id);
+    boxes.forEach((b) => { b.checked = !off.has(skus[Number(b.dataset.i)]); });
+    document.getElementById('sku-count').textContent = `${boxes.filter((b) => b.checked).length} of ${skus.length}`;
+  };
+  const apply = (offSet) => { saveSkuOff(brand.id, offSet); sync(); render(); };
+  boxes.forEach((b) => b.addEventListener('change', () => {
+    const off = loadSkuOff(brand.id);
+    const sku = skus[Number(b.dataset.i)];
+    if (b.checked) off.delete(sku); else off.add(sku);
+    apply(off);
+  }));
+  document.getElementById('sku-all').addEventListener('click', () => apply(new Set()));
+  document.getElementById('sku-none').addEventListener('click', () => apply(new Set(skus)));
+  document.getElementById('sku-close').addEventListener('click', closeSkuPanel);
+  sync();
+  panel.hidden = false;
 }
 
 function renderBrandList() {
