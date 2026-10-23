@@ -248,6 +248,18 @@ export function addEntry(p, name) {
   return { ...p, entries: [...p.entries, { id, name: clean, parentId: null, tags: [], ruleText: norm(clean) }] };
 }
 
+// Tag or untag a brand as an On-Premise focus.
+export function setOnPremise(p, id, on) {
+  return {
+    ...p,
+    entries: p.entries.map((x) => {
+      if (x.id !== id) return x;
+      const rest = x.tags.filter((t) => t !== 'on');
+      return { ...x, tags: on ? ['on', ...rest] : rest };
+    }),
+  };
+}
+
 export function removeEntry(p, id) {
   const gone = new Set([id, ...p.entries.filter((x) => x.parentId === id).map((x) => x.id)]);
   return {

@@ -7,7 +7,7 @@
 // otherwise the amounts in the master list itself. The two are never added
 // together, because the same product can sit in both files.
 
-import { effectiveOrder, matchSkus, activePreset } from './priorities.js?v=20261023d';
+import { effectiveOrder, matchSkus, activePreset } from './priorities.js?v=20261023e';
 
 // "Bota Box 3L Pinot Grigio 3L3" -> "Bota Box 3L Pinot Grigio": drop a trailing
 // item code (a last word that contains a digit) when something else remains.
@@ -88,10 +88,19 @@ export function buildBriefs(ctx) {
   return { header, stops: out };
 }
 
-// Rows of one stop split for display: gaps first, in priority order.
-export function splitRows(rows) {
+// Rows of one stop split for display: gaps first, in priority order. With
+// onPremFirst, the brands tagged On-Premise focus come back in gaps and
+// carrying (still in priority order) and every other brand in otherGaps and
+// otherCarrying, so nothing is hidden, just moved below.
+export function splitRows(rows, onPremFirst = false) {
+  const isGap = (r) => r.status === 'missing' || r.status === 'partial';
+  const isCarry = (r) => r.status === 'carries';
+  const focus = onPremFirst ? rows.filter((r) => r.entry.tags.includes('on')) : rows;
+  const other = onPremFirst ? rows.filter((r) => !r.entry.tags.includes('on')) : [];
   return {
-    gaps: rows.filter((r) => r.status === 'missing' || r.status === 'partial'),
-    carrying: rows.filter((r) => r.status === 'carries'),
+    gaps: focus.filter(isGap),
+    carrying: focus.filter(isCarry),
+    otherGaps: other.filter(isGap),
+    otherCarrying: other.filter(isCarry),
   };
 }

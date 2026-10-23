@@ -1,22 +1,22 @@
-import * as db from './core/db.js?v=20261023d';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261023d';
-import { buildMatches } from './data/matcher.js?v=20261023d';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261023d';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261023d';
+import * as db from './core/db.js?v=20261023e';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261023e';
+import { buildMatches } from './data/matcher.js?v=20261023e';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261023e';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261023e';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible,
-} from './modules/mapView.js?v=20261023d';
+} from './modules/mapView.js?v=20261023e';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261023d';
+} from './modules/heatmap.js?v=20261023e';
 import {
-  IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry,
-} from './modules/priorities.js?v=20261023d';
-import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261023d';
+  IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry, setOnPremise,
+} from './modules/priorities.js?v=20261023e';
+import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261023e';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261023d';
+} from './modules/route.js?v=20261023e';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -512,6 +512,7 @@ function renderPrioPanel() {
       <span class="prio-num">${child ? '' : n}</span>
       <span class="prio-name">${escapeHtml(entry.name)}${tags}</span>
       <span class="prio-count${master && !count ? ' zero' : ''}">${master ? `${count} SKU${count === 1 ? '' : 's'}` : ''}</span>
+      <label class="prio-onprem" title="Tag as an On-Premise focus brand"><input type="checkbox" data-tag-on="${escapeHtml(entry.id)}" aria-label="${escapeHtml(entry.name)} is an On-Premise focus"${entry.tags.includes('on') ? ' checked' : ''}> On-prem</label>
       <button class="prio-btn" data-act="up" aria-label="Move ${escapeHtml(entry.name)} up"${at === 0 ? ' disabled' : ''}>&#9650;</button>
       <button class="prio-btn" data-act="down" aria-label="Move ${escapeHtml(entry.name)} down"${at === sibs.length - 1 ? ' disabled' : ''}>&#9660;</button>
       <button class="prio-btn" data-act="top" aria-label="Move ${escapeHtml(entry.name)} to the top"${at === 0 ? ' disabled' : ''}>Top</button>
@@ -598,6 +599,8 @@ function prioChange(ev) {
     if (t.value) setPrio({ ...prio, presets: prio.presets.map((x) => (x.id === prio.activePresetId ? { ...x, bump: [...x.bump, t.value] } : x)) });
   } else if (t.dataset && t.dataset.rule) {
     setPrio({ ...prio, entries: prio.entries.map((x) => (x.id === t.dataset.rule ? { ...x, ruleText: t.value } : x)) });
+  } else if (t.dataset && t.dataset.tagOn) {
+    setPrio(setOnPremise(prio, t.dataset.tagOn, t.checked));
   } else if (t.dataset && t.dataset.assign) {
     if (t.value) setPrio({ ...prio, assign: { ...prio.assign, [t.dataset.assign]: t.value } });
   }
@@ -649,17 +652,22 @@ function briefStopHtml(item, index) {
       <div class="brief-inner">${addr}<div class="brief-warn">This store was not found in your master list, so whether it carries each brand is unknown.</div>
       ${withCases.length ? `<div class="brief-h">Cases on file</div><ul class="brief-list">${withCases.map((r) => `<li class="brief-row"><div class="brief-name">${escapeHtml(r.entry.name)}</div><div class="brief-detail">${formatAmount(r.cases)} cases</div></li>`).join('')}</ul>` : ''}</div></details>`;
   }
-  const { gaps, carrying } = splitRows(item.rows);
+  const { gaps, carrying, otherGaps, otherCarrying } = splitRows(item.rows, briefOnPrem);
   const head = gaps.slice(0, 8);
   const rest = gaps.slice(8);
   const gapHtml = gaps.length
     ? `<div class="brief-h">Pitch first (${gaps.length})</div><ul class="brief-list">${head.map(briefRowHtml).join('')}</ul>
        ${rest.length ? `<details class="brief-more"><summary>${rest.length} more gap${rest.length === 1 ? '' : 's'}</summary><ul class="brief-list">${rest.map(briefRowHtml).join('')}</ul></details>` : ''}`
-    : '<div class="brief-warn">No gaps: this store carries every priority brand that has SKUs in your master list.</div>';
+    : `<div class="brief-warn">No gaps: this store carries every ${briefOnPrem ? 'on-premise focus' : 'priority'} brand that has SKUs in your master list.</div>`;
   const carryHtml = carrying.length
     ? `<details class="brief-more"><summary>Already carrying (${carrying.length})</summary><ul class="brief-list">${carrying.map(briefRowHtml).join('')}</ul></details>` : '';
-  return `<details class="brief-stop"${open}><summary>${index + 1}. ${name}<span class="brief-sub">${gaps.length} gap${gaps.length === 1 ? '' : 's'} &middot; ${carrying.length} carrying</span></summary>
-    <div class="brief-inner">${addr}${gapHtml}${carryHtml}</div></details>`;
+  // On-premise mode: every other brand stays one tap away, in the same order.
+  const otherHtml = briefOnPrem && (otherGaps.length || otherCarrying.length)
+    ? `<details class="brief-more"><summary>Other brands (${otherGaps.length} gap${otherGaps.length === 1 ? '' : 's'}, ${otherCarrying.length} carrying)</summary>
+        ${otherGaps.length ? `<div class="brief-h">Gaps</div><ul class="brief-list">${otherGaps.map(briefRowHtml).join('')}</ul>` : ''}
+        ${otherCarrying.length ? `<div class="brief-h">Carrying</div><ul class="brief-list">${otherCarrying.map(briefRowHtml).join('')}</ul>` : ''}</details>` : '';
+  return `<details class="brief-stop"${open}><summary>${index + 1}. ${name}<span class="brief-sub">${gaps.length} gap${gaps.length === 1 ? '' : 's'} &middot; ${carrying.length} carrying${briefOnPrem ? ' (on-premise focus)' : ''}</span></summary>
+    <div class="brief-inner">${addr}${gapHtml}${carryHtml}${otherHtml}</div></details>`;
 }
 
 function openBrief() {
@@ -681,11 +689,23 @@ function openBrief() {
       : 'Your base priority order, no focus period in force.');
     if (h.noSkus.length) lines.push(`${h.noSkus.length} priority brand${h.noSkus.length === 1 ? ' has' : 's have'} no SKUs in this list and are left out: ${escapeHtml(h.noSkus.slice(0, 6).join(', '))}${h.noSkus.length > 6 ? ` and ${h.noSkus.length - 6} more` : ''}.`);
     if (h.needsHome) lines.push(`${h.needsHome} SKU${h.needsHome === 1 ? '' : 's'} need a home. Open Priorities to place ${h.needsHome === 1 ? 'it' : 'them'}.`);
-    html = `<div class="brief-head">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`
+    if (briefOnPrem) lines.push('On-premise focus brands come first. Every other brand is under Other brands on each stop.');
+    html = `<label class="brief-toggle"><input type="checkbox" id="brief-onprem"${briefOnPrem ? ' checked' : ''}> On-premise focus first</label>`
+      + `<div class="brief-head">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`
       + result.stops.map(briefStopHtml).join('');
   }
   body.innerHTML = html;
   document.getElementById('brief-modal').hidden = false;
+}
+
+// Whether the Brief puts the On-Premise focus brands first (remembered).
+let briefOnPrem = (() => { try { return localStorage.getItem('aa-brief-onprem-v1') === 'on'; } catch { return false; } })();
+
+function briefChange(ev) {
+  if (ev.target.id !== 'brief-onprem') return;
+  briefOnPrem = ev.target.checked;
+  try { localStorage.setItem('aa-brief-onprem-v1', briefOnPrem ? 'on' : 'off'); } catch { /* storage blocked */ }
+  openBrief();
 }
 
 function closeBrief() {
@@ -1286,6 +1306,7 @@ async function main() {
   document.getElementById('route-optimize').addEventListener('click', optimizeRoute);
   document.getElementById('route-brief').addEventListener('click', openBrief);
   document.getElementById('brief-close').addEventListener('click', closeBrief);
+  document.getElementById('brief-body').addEventListener('change', briefChange);
   document.getElementById('brief-modal').addEventListener('click', (ev) => { if (ev.target.id === 'brief-modal') closeBrief(); });
   document.getElementById('route-start').addEventListener('click', startRoute);
   document.getElementById('route-clear').addEventListener('click', () => {
