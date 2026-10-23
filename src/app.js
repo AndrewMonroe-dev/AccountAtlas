@@ -1,21 +1,22 @@
-import * as db from './core/db.js?v=20261023a';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261023a';
-import { buildMatches } from './data/matcher.js?v=20261023a';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261023a';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261023a';
+import * as db from './core/db.js?v=20261023d';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261023d';
+import { buildMatches } from './data/matcher.js?v=20261023d';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261023d';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261023d';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible,
-} from './modules/mapView.js?v=20261023a';
+} from './modules/mapView.js?v=20261023d';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261023a';
+} from './modules/heatmap.js?v=20261023d';
 import {
   IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry,
-} from './modules/priorities.js?v=20261023a';
+} from './modules/priorities.js?v=20261023d';
+import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261023d';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261023a';
+} from './modules/route.js?v=20261023d';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -603,6 +604,95 @@ function prioChange(ev) {
 }
 
 // ---------------------------------------------------------------
+// Pre-visit Brief (2026-10-23)
+// ---------------------------------------------------------------
+// One section per route stop: which priority brands the store is missing (in
+// Andrew's order, focus period first) and which it carries. Built on the phone
+// from data already stored there, nothing leaves the browser.
+
+function briefAddressKey(a) {
+  return normalizeAddressKey(a.address, a.city, a.state, a.zip);
+}
+
+function briefRowHtml(r) {
+  const tags = r.entry.tags.map((t) => `<span class="prio-tag">${t === 'on' ? 'On-premise' : 'Off-premise'}</span>`).join('');
+  const star = r.bumped ? '<span class="brief-star" title="In your current focus">&#9733;</span>' : '';
+  const cases = r.cases > 0 ? ` &middot; ${formatAmount(r.cases)} cases` : '';
+  let detail;
+  if (r.status === 'missing') {
+    detail = `Not carried (0 of ${r.total} SKU${r.total === 1 ? '' : 's'})`;
+  } else if (r.status === 'partial') {
+    const names = r.missing.slice(0, 3).map(shortSku).map(escapeHtml).join(', ');
+    detail = `Carries ${r.soldCount} of ${r.total}. Missing: ${names}${r.missing.length > 3 ? ` and ${r.missing.length - 3} more` : ''}`;
+  } else {
+    detail = `Carries ${r.total === 1 ? 'its 1 SKU' : `all ${r.total} SKUs`}`;
+  }
+  return `<li class="brief-row ${r.status}"><div class="brief-name">${star}${escapeHtml(r.entry.name)}${tags}</div><div class="brief-detail">${detail}${cases}</div></li>`;
+}
+
+function briefStopHtml(item, index) {
+  const name = escapeHtml(item.stop.name);
+  const open = index === 0 ? ' open' : '';
+  if (item.kind === 'place') {
+    return `<details class="brief-stop"${open}><summary>${index + 1}. ${name}<span class="brief-sub">nearby business</span></summary>
+      <div class="brief-inner"><div class="brief-warn">This is a nearby business from the map, not one of your accounts, so there is no sold or unsold data to show.</div></div></details>`;
+  }
+  if (item.kind === 'gone') {
+    return `<details class="brief-stop"${open}><summary>${index + 1}. ${name}</summary>
+      <div class="brief-inner"><div class="brief-warn">This account is no longer in your lists.</div></div></details>`;
+  }
+  const a = item.account;
+  const addr = `<div class="brief-addr">${escapeHtml([a.address, a.city].filter(Boolean).join(', '))}${a.county ? ' &middot; ' + escapeHtml(a.county) + ' County' : ''}</div>`;
+  if (item.kind === 'nomaster') {
+    const withCases = item.rows.filter((r) => r.cases > 0);
+    return `<details class="brief-stop"${open}><summary>${index + 1}. ${name}<span class="brief-sub">not in the master list</span></summary>
+      <div class="brief-inner">${addr}<div class="brief-warn">This store was not found in your master list, so whether it carries each brand is unknown.</div>
+      ${withCases.length ? `<div class="brief-h">Cases on file</div><ul class="brief-list">${withCases.map((r) => `<li class="brief-row"><div class="brief-name">${escapeHtml(r.entry.name)}</div><div class="brief-detail">${formatAmount(r.cases)} cases</div></li>`).join('')}</ul>` : ''}</div></details>`;
+  }
+  const { gaps, carrying } = splitRows(item.rows);
+  const head = gaps.slice(0, 8);
+  const rest = gaps.slice(8);
+  const gapHtml = gaps.length
+    ? `<div class="brief-h">Pitch first (${gaps.length})</div><ul class="brief-list">${head.map(briefRowHtml).join('')}</ul>
+       ${rest.length ? `<details class="brief-more"><summary>${rest.length} more gap${rest.length === 1 ? '' : 's'}</summary><ul class="brief-list">${rest.map(briefRowHtml).join('')}</ul></details>` : ''}`
+    : '<div class="brief-warn">No gaps: this store carries every priority brand that has SKUs in your master list.</div>';
+  const carryHtml = carrying.length
+    ? `<details class="brief-more"><summary>Already carrying (${carrying.length})</summary><ul class="brief-list">${carrying.map(briefRowHtml).join('')}</ul></details>` : '';
+  return `<details class="brief-stop"${open}><summary>${index + 1}. ${name}<span class="brief-sub">${gaps.length} gap${gaps.length === 1 ? '' : 's'} &middot; ${carrying.length} carrying</span></summary>
+    <div class="brief-inner">${addr}${gapHtml}${carryHtml}</div></details>`;
+}
+
+function openBrief() {
+  const body = document.getElementById('brief-body');
+  const master = masterBrand();
+  let html;
+  if (!master) {
+    html = '<div class="brief-warn">Upload your all-brands sold / unsold file first. The Brief needs it to know what each store carries.</div>';
+  } else if (!routeStops.length) {
+    html = '<div class="brief-warn">Add stops to your route first.</div>';
+  } else {
+    const result = buildBriefs({
+      stops: routeStops, accounts: state.accounts, brands: state.brands, prio, master, addressKey: briefAddressKey, today: todayString(),
+    });
+    const h = result.header;
+    const lines = [`Sold or not comes from <strong>${escapeHtml(h.master)}</strong>.`];
+    lines.push(h.focus
+      ? `Focus: <strong>${escapeHtml(h.focus.name)}</strong>${h.focus.endDate ? ' (ends ' + escapeHtml(h.focus.endDate) + ')' : ''}. Bumped to the top: ${escapeHtml(h.focus.bumped.join(', ') || 'none yet')}.`
+      : 'Your base priority order, no focus period in force.');
+    if (h.noSkus.length) lines.push(`${h.noSkus.length} priority brand${h.noSkus.length === 1 ? ' has' : 's have'} no SKUs in this list and are left out: ${escapeHtml(h.noSkus.slice(0, 6).join(', '))}${h.noSkus.length > 6 ? ` and ${h.noSkus.length - 6} more` : ''}.`);
+    if (h.needsHome) lines.push(`${h.needsHome} SKU${h.needsHome === 1 ? '' : 's'} need a home. Open Priorities to place ${h.needsHome === 1 ? 'it' : 'them'}.`);
+    html = `<div class="brief-head">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`
+      + result.stops.map(briefStopHtml).join('');
+  }
+  body.innerHTML = html;
+  document.getElementById('brief-modal').hidden = false;
+}
+
+function closeBrief() {
+  document.getElementById('brief-modal').hidden = true;
+}
+
+// ---------------------------------------------------------------
 // Route builder + Near me (2026-10-21)
 // ---------------------------------------------------------------
 // Tick "Add to route" on a store's panel and it becomes the next numbered
@@ -677,6 +767,7 @@ function renderRouteBar() {
     });
   });
   document.getElementById('route-optimize').disabled = routeStops.length < 2;
+  document.getElementById('route-brief').disabled = routeStops.length === 0;
   document.getElementById('route-start').disabled = routeStops.length === 0;
 }
 
@@ -1193,6 +1284,9 @@ async function main() {
   document.getElementById('near-me-btn').addEventListener('click', showNearMe);
   document.getElementById('near-close').addEventListener('click', () => { document.getElementById('near-panel').hidden = true; });
   document.getElementById('route-optimize').addEventListener('click', optimizeRoute);
+  document.getElementById('route-brief').addEventListener('click', openBrief);
+  document.getElementById('brief-close').addEventListener('click', closeBrief);
+  document.getElementById('brief-modal').addEventListener('click', (ev) => { if (ev.target.id === 'brief-modal') closeBrief(); });
   document.getElementById('route-start').addEventListener('click', startRoute);
   document.getElementById('route-clear').addEventListener('click', () => {
     routeStops = [];

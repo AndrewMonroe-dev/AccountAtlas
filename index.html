@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261023a">
-<link rel="stylesheet" href="assets/css/app.css?v=20261023a">
-<link rel="stylesheet" href="assets/css/map.css?v=20261023a">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261023d">
+<link rel="stylesheet" href="assets/css/app.css?v=20261023d">
+<link rel="stylesheet" href="assets/css/map.css?v=20261023d">
 </head>
 <body>
 <div class="app">
@@ -133,6 +133,7 @@
         <div class="route-status" id="route-status"></div>
         <div class="route-actions">
           <button class="ghost-btn" id="route-optimize">Optimize order</button>
+          <button class="ghost-btn" id="route-brief" disabled>Brief</button>
           <button class="ghost-btn" id="route-clear">Clear</button>
           <button class="solid-btn" id="route-start">Start route</button>
         </div>
@@ -202,9 +203,17 @@
   </div>
 </div>
 
+<!-- Pre-visit Brief modal -->
+<div class="modal-backdrop" id="brief-modal" hidden>
+  <div class="modal modal-wide" role="dialog" aria-label="Pre-visit brief">
+    <div class="modal-head"><h2>Pre-visit brief</h2><button class="near-close" id="brief-close" aria-label="Close">&times;</button></div>
+    <div id="brief-body" class="brief-body"></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module" src="src/app.js?v=20261023a"></script>
+<script type="module" src="src/app.js?v=20261023d"></script>
 </body>
 </html>
