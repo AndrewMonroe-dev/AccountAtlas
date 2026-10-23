@@ -1,18 +1,21 @@
-import * as db from './core/db.js?v=20261022d';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261022d';
-import { buildMatches } from './data/matcher.js?v=20261022d';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261022d';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261022d';
+import * as db from './core/db.js?v=20261023a';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261023a';
+import { buildMatches } from './data/matcher.js?v=20261023a';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261023a';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261023a';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible,
-} from './modules/mapView.js?v=20261022d';
+} from './modules/mapView.js?v=20261023a';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261022d';
+} from './modules/heatmap.js?v=20261023a';
+import {
+  IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry,
+} from './modules/priorities.js?v=20261023a';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261022d';
+} from './modules/route.js?v=20261023a';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -199,7 +202,8 @@ function renderHeatBar(note, brand, heat) {
     ? '<button class="heat-btn sku-btn" id="sku-btn" aria-haspopup="dialog">SKUs</button>' : '';
   bar.innerHTML = `<span class="heat-label">Shade</span>`
     + modes.map(([m, label]) => `<button class="heat-btn${state.heatMode === m ? ' on' : ''}" data-mode="${m}" aria-pressed="${state.heatMode === m}">${label}</button>`).join('')
-    + heatBtn + dotsBtn + skuBtn + legend
+    + heatBtn + dotsBtn + skuBtn
+    + '<button class="heat-btn" id="prio-btn" title="Your brand priority order and focus periods">Priorities</button>' + legend
     + (note ? `<span class="heat-note">${escapeHtml(note)}</span>` : '');
   document.getElementById('heat-toggle-btn').addEventListener('click', () => {
     state.heatOn = !state.heatOn;
@@ -207,6 +211,7 @@ function renderHeatBar(note, brand, heat) {
     closeSkuPanel();
     render();
   });
+  document.getElementById('prio-btn').addEventListener('click', openPrioPanel);
   document.getElementById('dots-btn').addEventListener('click', () => {
     state.dotsOn = !state.dotsOn;
     saveDotsOn(state.dotsOn);
@@ -397,6 +402,204 @@ function renderStats() {
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------------------------------------------------------------
+// Brand priorities (2026-10-23)
+// ---------------------------------------------------------------
+// Andrew's base brand order, focus periods that bump a few brands to the top
+// for a while, and the rules that match each brand to SKU headers in the
+// master sold/unsold list. Saved in the browser and carried in the all-lists
+// backup. The route Brief (below) reads it.
+
+let prio = loadPriorities();
+const prioRuleOpen = new Set();   // entry ids whose rule box is expanded
+let prioMsg = '';
+
+function setPrio(next) {
+  prio = next;
+  savePriorities(prio);
+  renderPrioPanel();
+}
+
+// The master sold/unsold list: the one Andrew picked, else the list with the
+// most SKUs (his all-brands file).
+function masterBrand() {
+  const chosen = state.brands.find((b) => b.id === prio.masterBrandId);
+  if (chosen) return chosen;
+  return [...state.brands].sort((a, b) => (b.skuList || []).length - (a.skuList || []).length)[0] || null;
+}
+
+function masterMatches() {
+  const master = masterBrand();
+  return master ? matchSkus(prio, master.skuList || []) : { byEntry: new Map(), unmatched: [] };
+}
+
+function openPrioPanel() {
+  prioMsg = '';
+  document.getElementById('prio-modal').hidden = false;
+  renderPrioPanel();
+}
+
+function closePrioPanel() {
+  document.getElementById('prio-modal').hidden = true;
+}
+
+function entryLabel(entry) {
+  const parent = entry.parentId ? prio.entries.find((x) => x.id === entry.parentId) : null;
+  return parent ? `${parent.name} / ${entry.name}` : entry.name;
+}
+
+function renderPrioPanel() {
+  const body = document.getElementById('prio-body');
+  if (!body || document.getElementById('prio-modal').hidden) return;
+  body.className = 'prio-body';
+  const master = masterBrand();
+  const matches = masterMatches();
+  const flat = flatOrder(prio.entries);
+  const today = todayString();
+  const preset = prio.presets.find((x) => x.id === prio.activePresetId) || null;
+  const expired = preset && preset.endDate && today > preset.endDate;
+
+  // 1. Source list
+  const srcOptions = ['<option value="">Automatic (list with the most SKUs)</option>']
+    .concat(state.brands.map((b) => `<option value="${escapeHtml(String(b.id))}"${b.id === prio.masterBrandId ? ' selected' : ''}>${escapeHtml(b.name)} (${(b.skuList || []).length} SKUs)</option>`)).join('');
+  const source = `<div class="prio-section"><h3>Sold / unsold source</h3>
+    <div class="prio-row-inline"><select id="prio-master" aria-label="Master list">${srcOptions}</select></div>
+    <div class="prio-note">${master
+    ? `Using <strong>${escapeHtml(master.name)}</strong>: ${(master.skuList || []).length} SKU columns, ${[...matches.byEntry.values()].reduce((n, a) => n + a.length, 0)} matched to a priority brand, ${matches.unmatched.length} need a home.`
+    : 'Upload your all-brands sold / unsold file first.'}</div></div>`;
+
+  // 2. Focus period
+  const presetOptions = ['<option value="">Base order (no focus)</option>']
+    .concat(prio.presets.map((x) => `<option value="${escapeHtml(x.id)}"${x.id === prio.activePresetId ? ' selected' : ''}>${escapeHtml(x.name)}${x.endDate ? ' (ends ' + escapeHtml(x.endDate) + ')' : ''}</option>`)).join('');
+  let focus = `<div class="prio-section"><h3>Focus period</h3>
+    <div class="prio-row-inline"><select id="prio-preset" aria-label="Focus period">${presetOptions}</select>
+      <button class="prio-btn" data-act="new-preset">New focus</button></div>`;
+  if (preset) {
+    const bumpRows = preset.bump.map((id, i) => {
+      const entry = prio.entries.find((x) => x.id === id);
+      return entry ? `<div class="prio-row" data-bump="${escapeHtml(id)}"><span class="prio-num">${i + 1}</span><span class="prio-name">${escapeHtml(entryLabel(entry))}</span>
+        <button class="prio-btn" data-act="bump-up" aria-label="Move ${escapeHtml(entry.name)} up in the focus"${i === 0 ? ' disabled' : ''}>&#9650;</button>
+        <button class="prio-btn" data-act="bump-down" aria-label="Move ${escapeHtml(entry.name)} down in the focus"${i === preset.bump.length - 1 ? ' disabled' : ''}>&#9660;</button>
+        <button class="prio-btn danger" data-act="bump-remove" aria-label="Remove ${escapeHtml(entry.name)} from the focus">&times;</button></div>` : '';
+    }).join('');
+    const addOptions = flat.filter((x) => !preset.bump.includes(x.id))
+      .map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(entryLabel(x))}</option>`).join('');
+    focus += `<div class="prio-row-inline">
+        <input type="text" id="prio-preset-name" value="${escapeHtml(preset.name)}" aria-label="Focus name">
+        <label class="prio-note" for="prio-preset-end">Ends</label>
+        <input type="date" id="prio-preset-end" value="${escapeHtml(preset.endDate)}" aria-label="Focus end date">
+        <button class="prio-btn danger" data-act="del-preset">Delete focus</button></div>
+      <div class="prio-note">${expired ? 'This focus has ended, so the base order is in use. Change the end date to bring it back.' : 'These brands are bumped to the top, in this order. Everything else stays in the base order.'}</div>
+      <div class="prio-list">${bumpRows || '<div class="prio-note">No brands bumped yet.</div>'}</div>
+      <div class="prio-row-inline"><select id="prio-bump-add" aria-label="Brand to bump"><option value="">Bump a brand...</option>${addOptions}</select></div>`;
+  }
+  focus += '</div>';
+
+  // 3. Base order
+  let n = 0;
+  const rows = flat.map((entry) => {
+    const child = !!entry.parentId;
+    if (!child) n += 1;
+    const sibs = prio.entries.filter((x) => (x.parentId || null) === (entry.parentId || null));
+    const at = sibs.indexOf(entry);
+    const count = (matches.byEntry.get(entry.id) || []).length;
+    const open = prioRuleOpen.has(entry.id);
+    const tags = entry.tags.map((t) => `<span class="prio-tag">${t === 'on' ? 'On-premise' : 'Off-premise'}</span>`).join('');
+    return `<div class="prio-row${child ? ' child' : ''}" data-id="${escapeHtml(entry.id)}">
+      <span class="prio-num">${child ? '' : n}</span>
+      <span class="prio-name">${escapeHtml(entry.name)}${tags}</span>
+      <span class="prio-count${master && !count ? ' zero' : ''}">${master ? `${count} SKU${count === 1 ? '' : 's'}` : ''}</span>
+      <button class="prio-btn" data-act="up" aria-label="Move ${escapeHtml(entry.name)} up"${at === 0 ? ' disabled' : ''}>&#9650;</button>
+      <button class="prio-btn" data-act="down" aria-label="Move ${escapeHtml(entry.name)} down"${at === sibs.length - 1 ? ' disabled' : ''}>&#9660;</button>
+      <button class="prio-btn" data-act="top" aria-label="Move ${escapeHtml(entry.name)} to the top"${at === 0 ? ' disabled' : ''}>Top</button>
+      <button class="prio-btn" data-act="rule" aria-expanded="${open}">Rule</button>
+      <button class="prio-btn danger" data-act="remove" aria-label="Remove ${escapeHtml(entry.name)}">&times;</button>
+      ${open ? `<div class="prio-rule"><textarea data-rule="${escapeHtml(entry.id)}" aria-label="Matching rule for ${escapeHtml(entry.name)}">${escapeHtml(entry.ruleText)}</textarea>
+        <div class="prio-note">One line per must-have word. Put alternatives on a line with | between them. A line starting with not: lists words that rule the SKU out.${(matches.byEntry.get(entry.id) || []).length ? ' Matches now: ' + escapeHtml((matches.byEntry.get(entry.id) || []).slice(0, 4).join(', ')) + ((matches.byEntry.get(entry.id) || []).length > 4 ? ', ...' : '') : ''}</div></div>` : ''}
+    </div>`;
+  }).join('');
+  const order = `<div class="prio-section"><h3>Base order</h3>
+    <div class="prio-list">${rows}</div>
+    <div class="prio-row-inline"><input type="text" id="prio-add-name" placeholder="New brand name" aria-label="New brand name"><button class="prio-btn" data-act="add">Add brand</button></div>
+    <div class="prio-note">A new brand goes to the bottom, with a rule that looks for its name in the SKU headers. Use Top, Up and Down to place it.</div></div>`;
+
+  // 4. Needs a home
+  const homeOptions = flat.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(entryLabel(x))}</option>`).join('');
+  const needs = matches.unmatched.length
+    ? `<div class="prio-section"><h3>Needs a home (${matches.unmatched.length})</h3>
+        <div class="prio-note">These SKU columns matched no brand. Pick the brand each belongs to, or ignore it. The Brief skips ignored SKUs.</div>
+        ${matches.unmatched.map((sku) => `<div class="prio-row" data-sku="${escapeHtml(sku)}"><span class="prio-name">${escapeHtml(sku)}</span>
+          <select data-assign="${escapeHtml(norm(sku))}" aria-label="Brand for ${escapeHtml(sku)}"><option value="">Choose...</option>${homeOptions}<option value="${IGNORE}">Ignore this SKU</option></select></div>`).join('')}</div>`
+    : '';
+
+  body.innerHTML = (prioMsg ? `<div class="prio-note">${escapeHtml(prioMsg)}</div>` : '') + source + focus + order + needs;
+}
+
+function prioClick(ev) {
+  const btn = ev.target.closest('[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const row = btn.closest('[data-id]');
+  const id = row ? row.dataset.id : null;
+  const preset = prio.presets.find((x) => x.id === prio.activePresetId);
+  const withPreset = (fn) => setPrio({ ...prio, presets: prio.presets.map((x) => (x.id === prio.activePresetId ? fn(x) : x)) });
+  if (act === 'up' || act === 'down' || act === 'top') {
+    setPrio(moveEntry(prio, id, act === 'top' ? 'top' : (act === 'up' ? -1 : 1)));
+  } else if (act === 'rule') {
+    if (prioRuleOpen.has(id)) prioRuleOpen.delete(id); else prioRuleOpen.add(id);
+    renderPrioPanel();
+  } else if (act === 'remove') {
+    const entry = prio.entries.find((x) => x.id === id);
+    const kids = prio.entries.filter((x) => x.parentId === id).length;
+    if (entry && confirm(`Remove ${entry.name}${kids ? ` and its ${kids} sub-brand${kids === 1 ? '' : 's'}` : ''} from your priority list?`)) setPrio(removeEntry(prio, id));
+  } else if (act === 'add') {
+    const input = document.getElementById('prio-add-name');
+    const next = addEntry(prio, input.value);
+    if (next === prio) { input.focus(); return; }
+    setPrio(next);
+  } else if (act === 'new-preset') {
+    const name = (prompt('Name for this focus period (for example Holiday push):') || '').trim();
+    if (!name) return;
+    const idNew = 'f-' + Date.now().toString(36);
+    setPrio({ ...prio, presets: [...prio.presets, { id: idNew, name, endDate: '', bump: [] }], activePresetId: idNew });
+  } else if (act === 'del-preset' && preset) {
+    if (confirm(`Delete the focus "${preset.name}"?`)) setPrio({ ...prio, presets: prio.presets.filter((x) => x.id !== preset.id), activePresetId: null });
+  } else if (act === 'bump-up' || act === 'bump-down') {
+    const bid = btn.closest('[data-bump]').dataset.bump;
+    withPreset((x) => {
+      const list = x.bump.slice();
+      const i = list.indexOf(bid);
+      const j = i + (act === 'bump-up' ? -1 : 1);
+      if (i < 0 || j < 0 || j >= list.length) return x;
+      [list[i], list[j]] = [list[j], list[i]];
+      return { ...x, bump: list };
+    });
+  } else if (act === 'bump-remove') {
+    const bid = btn.closest('[data-bump]').dataset.bump;
+    withPreset((x) => ({ ...x, bump: x.bump.filter((b) => b !== bid) }));
+  }
+}
+
+function prioChange(ev) {
+  const t = ev.target;
+  if (t.id === 'prio-master') {
+    setPrio({ ...prio, masterBrandId: t.value || null });
+  } else if (t.id === 'prio-preset') {
+    setPrio({ ...prio, activePresetId: t.value || null });
+  } else if (t.id === 'prio-preset-name') {
+    const name = t.value.trim();
+    if (name) setPrio({ ...prio, presets: prio.presets.map((x) => (x.id === prio.activePresetId ? { ...x, name } : x)) });
+  } else if (t.id === 'prio-preset-end') {
+    setPrio({ ...prio, presets: prio.presets.map((x) => (x.id === prio.activePresetId ? { ...x, endDate: t.value } : x)) });
+  } else if (t.id === 'prio-bump-add') {
+    if (t.value) setPrio({ ...prio, presets: prio.presets.map((x) => (x.id === prio.activePresetId ? { ...x, bump: [...x.bump, t.value] } : x)) });
+  } else if (t.dataset && t.dataset.rule) {
+    setPrio({ ...prio, entries: prio.entries.map((x) => (x.id === t.dataset.rule ? { ...x, ruleText: t.value } : x)) });
+  } else if (t.dataset && t.dataset.assign) {
+    if (t.value) setPrio({ ...prio, assign: { ...prio.assign, [t.dataset.assign]: t.value } });
+  }
 }
 
 // ---------------------------------------------------------------
@@ -665,9 +868,12 @@ function importSnapshot() {
     // A list name appearing twice in the batch keeps the last one.
     const incoming = new Map();
     const problems = [];
+    let importedPrio = null;
     for (const file of files) {
       try {
-        (await parseSnapshotFile(file)).forEach((list) => incoming.set(list.brand.name.toLowerCase(), list));
+        const parsed = await parseSnapshotFile(file);
+        if (parsed.priorities) importedPrio = parsed.priorities;
+        parsed.forEach((list) => incoming.set(list.brand.name.toLowerCase(), list));
       } catch (err) {
         problems.push(`${file.name}: ${err.message}`);
       }
@@ -708,10 +914,28 @@ function importSnapshot() {
 
     await loadAll();
     await recomputeMatches();
+
+    // Brand priorities in a backup: applied silently over untouched defaults,
+    // otherwise only after a confirm, so a restore never wipes edits unasked.
+    let prioNote = '';
+    if (importedPrio) {
+      const incomingPrio = cleanPriorities(importedPrio);
+      const wanted = String(importedPrio.masterBrandName || '').toLowerCase();
+      const master = wanted ? state.brands.find((b) => b.name.toLowerCase() === wanted) : null;
+      incomingPrio.masterBrandId = master ? master.id : null;
+      const untouched = JSON.stringify({ ...prio, masterBrandId: null }) === JSON.stringify({ ...defaultPriorities(), masterBrandId: null });
+      if (untouched || confirm('This backup includes your brand priorities. OK replaces your current priorities with the backup\'s. Cancel keeps your current ones.')) {
+        prio = incomingPrio;
+        savePriorities(prio);
+        prioNote = '\n\nBrand priorities restored from the backup.';
+      } else {
+        prioNote = '\n\nKept your current brand priorities.';
+      }
+    }
     render();
 
     alert(
-      (done.length ? `Imported ${done.length} list${done.length === 1 ? '' : 's'}:\n${done.join('\n')}` : 'Nothing was imported.') +
+      (done.length ? `Imported ${done.length} list${done.length === 1 ? '' : 's'}:\n${done.join('\n')}` : 'Nothing was imported.') + prioNote +
       (skipped.length ? `\n\nKept your current copy of: ${skipped.join(', ')}` : '') +
       (problems.length ? `\n\nCould not read:\n${problems.join('\n')}` : '')
     );
@@ -995,11 +1219,17 @@ async function main() {
   });
   backdropEl.addEventListener('click', closeSidebar);
 
+  document.getElementById('prio-close').addEventListener('click', closePrioPanel);
+  document.getElementById('prio-modal').addEventListener('click', (ev) => { if (ev.target.id === 'prio-modal') closePrioPanel(); });
+  const prioBody = document.getElementById('prio-body');
+  prioBody.addEventListener('click', prioClick);
+  prioBody.addEventListener('change', prioChange);
   document.getElementById('add-brand-btn').addEventListener('click', openUploadModal);
   document.getElementById('import-snapshot-btn').addEventListener('click', importSnapshot);
   document.getElementById('backup-all-btn').addEventListener('click', () => {
     if (!state.brands.length) { alert('There are no lists to back up yet.'); return; }
-    exportAllLists(state.brands, state.accounts);
+    const master = state.brands.find((b) => b.id === prio.masterBrandId);
+    exportAllLists(state.brands, state.accounts, { ...prio, masterBrandName: master ? master.name : '' });
   });
   document.getElementById('upload-cancel').addEventListener('click', closeUploadModal);
   document.getElementById('upload-submit').addEventListener('click', handleUpload);

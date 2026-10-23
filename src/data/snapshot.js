@@ -319,7 +319,10 @@ export async function parseSnapshotFile(file) {
   if (Array.isArray(data.lists)) {
     const lists = data.lists.filter((l) => l && l.brand && l.brand.name && Array.isArray(l.accounts));
     if (!lists.length) throw new Error('This backup file has no lists in it.');
-    return lists.map((l) => ({ brand: l.brand, accounts: l.accounts }));
+    const out = lists.map((l) => ({ brand: l.brand, accounts: l.accounts }));
+    // Brand priorities ride along in an all-lists backup (2026-10-23).
+    if (data.priorities && typeof data.priorities === 'object') out.priorities = data.priorities;
+    return out;
   }
   if (!data.brand || !Array.isArray(data.accounts)) {
     throw new Error('This file doesn\'t look like an Account Atlas snapshot or backup.');
@@ -330,10 +333,11 @@ export async function parseSnapshotFile(file) {
 // One file holding every list (brands plus all their accounts with resolved
 // coordinates), so a phone's whole setup can be saved or moved in one go.
 // Import it back through the same Import button as a single snapshot.
-export function exportAllLists(brands, accounts) {
+export function exportAllLists(brands, accounts, priorities = null) {
   const backup = {
     formatVersion: 2,
     exportedAt: new Date().toISOString(),
+    ...(priorities ? { priorities } : {}),
     lists: brands.map((brand) => ({
       brand,
       accounts: accounts.filter((a) => a.brandId === brand.id),
