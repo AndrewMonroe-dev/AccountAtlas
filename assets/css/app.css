@@ -379,3 +379,13 @@ button, input, select { font: inherit; color: inherit; }
 }
 .place-row .prio-btn { min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font-size: 12.5px; cursor: pointer; }
 .placed-note { font-size: 10.5px; color: var(--accent); margin: -4px 0 6px; }
+
+/* Near me tabs: Closest and Best bets. */
+.near-tabs { display: flex; gap: 4px; }
+.near-tab {
+  min-height: 34px; padding: 5px 12px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--panel-2);
+  color: var(--ink-dim); font-size: 12.5px; cursor: pointer;
+}
+.near-tab.on { border-color: var(--accent); background: var(--panel); color: var(--ink); font-weight: 600; }
+.near-hint { font-size: 11px; color: var(--ink-dim); padding: 0 0 6px; }
+.near-hint[hidden] { display: none; }

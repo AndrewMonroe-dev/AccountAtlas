@@ -216,6 +216,26 @@ check('brief opens for the stop', /Pre-visit brief|Sold or not/.test(await page.
 await page.keyboard.press('Escape');
 check('Escape closes the brief', await page.locator('#brief-modal').isHidden());
 
+// ---- Near me: closest and best bets
+await page.click('#near-me-btn');
+await page.waitForSelector('#near-list .near-row');
+check('Near me lists 10 closest by default', (await page.locator('#near-list .near-row').count()) === 10 && await page.locator('#near-tab-closest.on').count() === 1);
+check('closest rows say sold or unsold', /(sold|unsold)$/.test((await page.textContent('#near-list .near-sub')).trim()));
+await page.click('#near-tab-best');
+await page.waitForFunction(() => /Pitch:|no gaps|not in the master/.test(document.querySelector('#near-list .near-sub')?.textContent || ''));
+check('Best bets rows show what to pitch', /Pitch: .*Bota Box|Pitch: .*Stoneleigh/.test(await page.textContent('#near-list')), await page.textContent('#near-list'));
+check('Best bets explains its ranking', await page.locator('#near-hint').isVisible());
+const miles = await page.$$eval('#near-list .near-sub', (els) => els.map((e) => Number(e.textContent.match(/([\d.]+) mi/)[1])));
+check('Best bets stays within the nearest 30 stores', miles.length === 10 && miles.every((m) => m < 200), miles.join(','));
+await page.reload();
+await page.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached' });
+await page.click('#near-me-btn');
+await page.waitForSelector('#near-list .near-row');
+check('Best bets tab is remembered', await page.locator('#near-tab-best.on').count() === 1);
+await page.click('#near-tab-closest');
+await page.click('#near-close');
+await page.waitForSelector('#route-bar:not([hidden])', { timeout: 3000 }).catch(() => {});
+
 // ---- delete a list: stop from that list leaves the route
 const routeBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('aa-route-v1') || '[]').length);
 await page.click('[aria-label="Delete List A"]');

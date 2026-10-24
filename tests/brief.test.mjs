@@ -69,3 +69,44 @@ test('shortSku drops a trailing item code', () => {
   assert.equal(shortSku('Bota Box 3L Pinot Grigio 3L3'), 'Bota Box 3L Pinot Grigio');
   assert.equal(shortSku('Relax 750'), 'Relax 750');
 });
+
+import { gapScore, rankBestBets } from '../src/modules/brief.js';
+
+const row = (id, status) => ({ entry: { id, name: id, tags: [] }, status });
+
+test('gap score weighs earlier brands more and partial gaps half', () => {
+  const rows = [row('a', 'missing'), row('b', 'carries'), row('c', 'partial'), row('d', 'missing')];
+  const { score, gaps } = gapScore(rows);
+  assert.deepEqual(gaps.map((r) => r.entry.id), ['a', 'c', 'd']);
+  assert.equal(score, 1 * (4 / 4) + 0.5 * (2 / 4) + 1 * (1 / 4));
+  assert.equal(gapScore([row('a', 'carries'), row('b', 'carries')]).score, 0);
+});
+
+test('brands with no SKUs in the master do not dilute the score', () => {
+  const a = gapScore([row('x', 'noskus'), row('a', 'missing')]).score;
+  const b = gapScore([row('a', 'missing')]).score;
+  assert.equal(a, b);
+});
+
+test('on-premise mode counts only the focus brands', () => {
+  const rows = [
+    { entry: { id: 'off', name: 'off', tags: [] }, status: 'missing' },
+    { entry: { id: 'on', name: 'on', tags: ['on'] }, status: 'missing' },
+  ];
+  assert.deepEqual(gapScore(rows, true).gaps.map((r) => r.entry.id), ['on']);
+  assert.ok(gapScore(rows, false).score > gapScore(rows, true).score);
+});
+
+test('best bets: a close store with a good pitch beats a far one, unknown stores go last', () => {
+  const ok = (rows) => ({ kind: 'ok', rows });
+  const strong = [row('a', 'missing'), row('b', 'missing'), row('c', 'missing')];
+  const weak = [row('a', 'carries'), row('b', 'carries'), row('c', 'missing')];
+  const ranked = rankBestBets([
+    { acct: { id: 'far' }, miles: 100, brief: ok(strong) },
+    { acct: { id: 'near-weak' }, miles: 0.5, brief: ok(weak) },
+    { acct: { id: 'near-strong' }, miles: 1, brief: ok(strong) },
+    { acct: { id: 'nomaster' }, miles: 0.1, brief: { kind: 'nomaster', rows: [] } },
+  ]);
+  assert.deepEqual(ranked.map((r) => r.acct.id), ['near-strong', 'near-weak', 'far', 'nomaster']);
+  assert.ok(ranked[0].gaps.length === 3);
+});

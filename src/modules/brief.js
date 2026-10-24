@@ -104,3 +104,41 @@ export function splitRows(rows, onPremFirst = false) {
     otherCarrying: other.filter(isCarry),
   };
 }
+
+// How much a store's gaps are worth pitching. Every priority brand with SKUs in
+// the master list counts by its place in the order (the first brand is worth
+// the most, the last the least). A brand the store does not carry counts in
+// full, a partly carried one counts half. With onPremFirst only the On-Premise
+// focus brands count. Returns { score, gaps } with gaps in priority order.
+export function gapScore(rows, onPremFirst = false) {
+  const eligible = rows.filter((r) => r.status !== 'noskus');
+  const n = eligible.length || 1;
+  const { gaps } = splitRows(rows, onPremFirst);
+  let score = 0;
+  gaps.forEach((r) => {
+    const place = eligible.indexOf(r);
+    score += ((n - place) / n) * (r.status === 'missing' ? 1 : 0.5);
+  });
+  return { score, gaps };
+}
+
+// The best stores to walk into from here. candidates: [{ acct, miles, brief }]
+// with brief from buildBriefs (kind 'ok' when the store is in the master list).
+// A store's value is its gap score, discounted by distance so that a close store
+// with a good pitch beats a far one with slightly more to sell: the value halves
+// at 10 miles. Stores missing from the master list go last, nearest first.
+export function rankBestBets(candidates, onPremFirst = false) {
+  const scored = [];
+  const unknown = [];
+  candidates.forEach((c) => {
+    if (c.brief && c.brief.kind === 'ok') {
+      const { score, gaps } = gapScore(c.brief.rows, onPremFirst);
+      scored.push({ ...c, score, gaps, value: score / (1 + c.miles / 10) });
+    } else {
+      unknown.push({ ...c, score: 0, gaps: [], value: 0 });
+    }
+  });
+  scored.sort((x, y) => y.value - x.value || x.miles - y.miles);
+  unknown.sort((x, y) => x.miles - y.miles);
+  return [...scored, ...unknown];
+}

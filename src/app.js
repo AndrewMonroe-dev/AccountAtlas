@@ -15,7 +15,7 @@ import {
 import {
   IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry, setOnPremise,
 } from './modules/priorities.js?v=20261024b';
-import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261024b';
+import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261024b';
 import {
   MAX_STOPS, LEG_SIZE, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, routeLegs, legUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
 } from './modules/route.js?v=20261024b';
@@ -414,6 +414,7 @@ function setPrio(next) {
   prio = next;
   savePriorities(prio);
   renderPrioPanel();
+  refreshNear();
 }
 
 // The master sold/unsold list: the one Andrew picked, else the list with the
@@ -699,6 +700,7 @@ function briefChange(ev) {
   briefOnPrem = ev.target.checked;
   try { localStorage.setItem('aa-brief-onprem-v1', briefOnPrem ? 'on' : 'off'); } catch { /* storage blocked */ }
   openBrief();
+  refreshNear();
 }
 
 function closeBrief() {
@@ -718,7 +720,12 @@ let routeStops = loadRoute();
 let legIndex = 0;   // next leg to open when Short legs is on
 const LEGS_KEY = 'aa-route-legs-v1';
 let legsOn = (() => { try { return localStorage.getItem(LEGS_KEY) === 'on'; } catch { return false; } })();
-let nearRows = [];   // [{ acct, miles }] from the last Near me search
+let nearRows = [];   // rows shown in the Near me panel: { acct, miles, gaps?, brief? }
+let nearPool = [];   // the 30 nearest mapped accounts from the last search: { acct, miles }
+let nearHere = null; // where that search was made
+let nearMessage = '';
+const NEAR_MODE_KEY = 'aa-near-mode-v1';
+let nearMode = (() => { try { return localStorage.getItem(NEAR_MODE_KEY) === 'best' ? 'best' : 'closest'; } catch { return 'closest'; } })();
 
 function routePositionOf(id) {
   return routeStops.findIndex((s) => s.id === id) + 1;
@@ -860,18 +867,61 @@ function startRoute() {
   a.remove();
 }
 
+// Rebuilds the rows from the pool. Closest is the first 10 by distance. Best
+// bets reads each store's gaps against the master list (the same logic as the
+// Brief) and ranks by what is worth pitching, discounted by distance.
+function buildNearRows() {
+  nearMessage = '';
+  if (nearMode === 'best') {
+    const master = masterBrand();
+    if (!master) {
+      nearRows = [];
+      nearMessage = 'Upload your all-brands sold / unsold file first. Best bets needs it to know what each store carries.';
+      return;
+    }
+    const result = buildBriefs({
+      stops: nearPool.map(({ acct }) => ({ id: acct.id, name: acct.storeName })),
+      accounts: state.accounts, brands: state.brands, prio, master, addressKey: briefAddressKey, today: todayString(),
+    });
+    nearRows = rankBestBets(nearPool.map((c, i) => ({ ...c, brief: result.stops[i] })), briefOnPrem).slice(0, 10);
+  } else {
+    nearRows = nearPool.slice(0, 10);
+  }
+}
+
+function pitchText(row) {
+  if (!row.brief || row.brief.kind !== 'ok') return 'not in the master list';
+  if (!row.gaps.length) return 'no gaps';
+  const names = row.gaps.slice(0, 3).map((r) => r.entry.name).join(', ');
+  return `Pitch: ${escapeHtml(names)}${row.gaps.length > 3 ? ` +${row.gaps.length - 3} more` : ''}`;
+}
+
 function renderNearList() {
   const panel = document.getElementById('near-panel');
-  if (panel.hidden || !nearRows.length) return;
+  if (panel.hidden) return;
   const list = document.getElementById('near-list');
-  list.innerHTML = nearRows.map(({ acct, miles }) => `
+  const best = nearMode === 'best';
+  document.getElementById('near-tab-closest').classList.toggle('on', !best);
+  document.getElementById('near-tab-closest').setAttribute('aria-pressed', String(!best));
+  document.getElementById('near-tab-best').classList.toggle('on', best);
+  document.getElementById('near-tab-best').setAttribute('aria-pressed', String(best));
+  const hint = document.getElementById('near-hint');
+  hint.hidden = !best || !!nearMessage;
+  hint.textContent = 'Ranked by the priority brands each store is missing, closer stores first. Uses your Priorities and the On-premise switch in the Brief.';
+  if (nearMessage) { list.innerHTML = `<div class="near-msg">${escapeHtml(nearMessage)}</div>`; return; }
+  if (!nearRows.length) return;
+  list.innerHTML = nearRows.map((row) => {
+    const { acct, miles } = row;
+    const sub = best ? pitchText(row) : (Object.values(acct.skus).some(Boolean) ? 'sold' : 'unsold');
+    return `
     <div class="near-row">
       <div class="near-info" data-focus="${escapeHtml(String(acct.id))}">
         <div class="near-name">${escapeHtml(acct.storeName)}</div>
-        <div class="near-sub">${escapeHtml(acct.city)} &middot; ${miles.toFixed(1)} mi &middot; ${Object.values(acct.skus).some(Boolean) ? 'sold' : 'unsold'}</div>
+        <div class="near-sub">${escapeHtml(acct.city)} &middot; ${miles.toFixed(1)} mi &middot; ${sub}</div>
       </div>
       <button data-add="${escapeHtml(String(acct.id))}" ${routePositionOf(acct.id) ? 'disabled' : ''}>${routePositionOf(acct.id) ? 'Stop ' + routePositionOf(acct.id) : '+ Route'}</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   list.querySelectorAll('[data-focus]').forEach((el) => {
     el.addEventListener('click', () => focusAccount(nearRows.find((r) => String(r.acct.id) === el.dataset.focus).acct.id));
   });
@@ -883,11 +933,29 @@ function renderNearList() {
   });
 }
 
+// Called when something that changes the ranking changes (priorities, the
+// On-premise switch, the tab).
+function refreshNear() {
+  if (document.getElementById('near-panel').hidden || !nearPool.length) return;
+  buildNearRows();
+  renderNearList();
+}
+
+function setNearMode(mode) {
+  nearMode = mode;
+  try { localStorage.setItem(NEAR_MODE_KEY, mode); } catch { /* storage blocked */ }
+  refreshNear();
+  if (nearHere && nearRows.length) fitToPoints([[nearHere.lat, nearHere.lon], ...nearRows.map((r) => [r.acct.lat, r.acct.lon])]);
+}
+
 async function showNearMe() {
   const panel = document.getElementById('near-panel');
   const list = document.getElementById('near-list');
   panel.hidden = false;
   nearRows = [];
+  nearPool = [];
+  nearMessage = '';
+  renderNearList();
   list.innerHTML = '<div class="near-msg">Finding you...</div>';
   let here;
   try {
@@ -896,18 +964,20 @@ async function showNearMe() {
     list.innerHTML = `<div class="near-msg">${escapeHtml(err.message)}</div>`;
     return;
   }
+  nearHere = here;
   showUserLocation(here.lat, here.lon);
-  nearRows = visibleAccounts()
+  nearPool = visibleAccounts()
     .filter((a) => a.lat !== null && a.lon !== null)
     .map((acct) => ({ acct, miles: haversineMiles(here, { lat: acct.lat, lon: acct.lon }) }))
     .sort((x, y) => x.miles - y.miles)
-    .slice(0, 10);
-  if (!nearRows.length) {
+    .slice(0, 30);
+  if (!nearPool.length) {
     list.innerHTML = '<div class="near-msg">No accounts with a map point in the current view.</div>';
     return;
   }
+  buildNearRows();
   renderNearList();
-  fitToPoints([[here.lat, here.lon], ...nearRows.map((r) => [r.acct.lat, r.acct.lon])]);
+  if (nearRows.length) fitToPoints([[here.lat, here.lon], ...nearRows.map((r) => [r.acct.lat, r.acct.lon])]);
 }
 
 // ---------------------------------------------------------------
@@ -1459,6 +1529,8 @@ function onEscape(ev) {
 function wireUi() {
   document.getElementById('brand-list').addEventListener('click', brandListClick);
   document.getElementById('near-me-btn').addEventListener('click', showNearMe);
+  document.getElementById('near-tab-closest').addEventListener('click', () => setNearMode('closest'));
+  document.getElementById('near-tab-best').addEventListener('click', () => setNearMode('best'));
   document.getElementById('near-close').addEventListener('click', () => { document.getElementById('near-panel').hidden = true; });
   document.getElementById('route-optimize').addEventListener('click', optimizeRoute);
   document.getElementById('route-brief').addEventListener('click', openBrief);

@@ -99,9 +99,13 @@
           <div class="nearby-status" id="nearby-status" hidden></div>
           <div class="near-panel" id="near-panel" hidden>
             <div class="near-head">
-              <span>Closest accounts</span>
+              <div class="near-tabs" role="group" aria-label="Near me view">
+                <button type="button" class="near-tab on" id="near-tab-closest" aria-pressed="true">Closest</button>
+                <button type="button" class="near-tab" id="near-tab-best" aria-pressed="false">Best bets</button>
+              </div>
               <button class="near-close" id="near-close" aria-label="Close">&times;</button>
             </div>
+            <div class="near-hint" id="near-hint" hidden></div>
             <div id="near-list"></div>
           </div>
         </div>
