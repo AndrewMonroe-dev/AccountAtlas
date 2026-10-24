@@ -122,6 +122,38 @@ const total1 = Number(await page.textContent('#stat-sold')) + Number(await page.
 check('county filter narrows the totals (merged spellings together)', total1 > 0 && total1 < total0 && total1 === Math.floor(120 / 7) + (120 % 7 > 0 ? 0 : 0) + 0 || (total1 > 15 && total1 < 40), `${total1} of ${total0}`);
 await page.click('#clear-county-filter');
 
+// ---- place unmapped accounts by hand: typed coordinates, then tap the map
+const unmappedCount = async () => Number((await page.textContent('#unmapped-badge')).match(/\d+/)[0]);
+const unmappedBefore = await unmappedCount();
+await page.click('#unmapped-badge');
+await page.waitForSelector('#unmapped-modal:not([hidden]) .place-row');
+const firstName = await page.textContent('#unmapped-list .review-row:first-child strong');
+await page.fill('#unmapped-list .review-row:first-child .place-input', 'not coordinates');
+await page.click('#unmapped-list .review-row:first-child [data-place="set"]');
+check('bad coordinates are refused with a message', /Could not read coordinates/.test(await page.textContent('#unmapped-retry-status')));
+await page.fill('#unmapped-list .review-row:first-child .place-input', '42.7325, -84.5555');
+await page.click('#unmapped-list .review-row:first-child [data-place="set"]');
+await page.waitForFunction((n) => Number(document.getElementById('unmapped-badge').textContent.match(/\d+/)[0]) === n - 1, unmappedBefore);
+check('typed coordinates place the account', (await unmappedCount()) === unmappedBefore - 1);
+check('placed account leaves the unmapped list', !(await page.textContent('#unmapped-list')).includes(firstName));
+dialogs.length = 0;
+await page.fill('#unmapped-list .review-row:first-child .place-input', '34.05, -118.24');
+await page.click('#unmapped-list .review-row:first-child [data-place="set"]');
+check('a point outside Michigan asks first', dialogs.some((d) => /outside Michigan/.test(d)), dialogs.join('/'));
+await page.waitForFunction((n) => Number(document.getElementById('unmapped-badge').textContent.match(/\d+/)[0]) === n - 2, unmappedBefore);
+await page.click('#unmapped-list .review-row:first-child [data-place="pick"]');
+check('Pick on map shows the banner and hides the modal', await page.locator('#place-bar').isVisible() && await page.locator('#unmapped-modal').isHidden());
+await page.keyboard.press('Escape');
+check('Escape cancels placing', await page.locator('#place-bar').isHidden() && (await unmappedCount()) === unmappedBefore - 2);
+await page.click('#unmapped-badge');
+await page.click('#unmapped-list .review-row:first-child [data-place="pick"]');
+await page.mouse.click(560, 220);
+await page.waitForFunction((n) => Number(document.getElementById('unmapped-badge').textContent?.match(/\d+/)?.[0] ?? 0) === n - 3 || document.getElementById('unmapped-badge').hidden, unmappedBefore);
+check('tapping the map places the account', (await page.locator('#place-bar').isHidden()) && ((await page.locator('#unmapped-badge').isHidden()) || (await unmappedCount()) === unmappedBefore - 3));
+await page.waitForSelector('#detail-panel:not([hidden])');
+check('the placed account opens with a Placed by hand note', /Placed by hand/.test(await page.textContent('#detail-body')));
+await page.keyboard.press('Escape');
+
 // ---- bad re-upload leaves the old list alone
 await upload('List A', xlsxBad);
 await page.waitForFunction(() => /Could not parse/.test(document.getElementById('upload-warnings').textContent));

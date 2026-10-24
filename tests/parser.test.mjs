@@ -59,3 +59,12 @@ test('geocodes carry forward from the previous upload and from other brands', ()
   assert.equal(other.accounts[1].lat, 1);
   assert.equal(other.accounts[1].geocodeStatus, 'ok');
 });
+
+test('a point placed by hand survives a re-upload and is never marked pending', () => {
+  const first = parseBrandWorkbook(workbook(rows()), 'b1');
+  first.accounts[2].lat = 42.1; first.accounts[2].lon = -84.2; first.accounts[2].geocodeStatus = 'manual';
+  const prev = Object.fromEntries(first.accounts.map((a) => [a.id, a]));
+  const again = parseBrandWorkbook(workbook(rows()), 'b1', { previousById: prev });
+  assert.equal(again.accounts[2].lat, 42.1);
+  assert.equal(again.accounts[2].geocodeStatus, 'manual');
+});

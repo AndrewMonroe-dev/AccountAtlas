@@ -88,6 +88,10 @@
       <div class="heat-bar" id="heat-bar" hidden></div>
       <div class="map-stage">
       <div class="sku-panel" id="sku-panel" hidden></div>
+      <div class="place-bar" id="place-bar" role="status" hidden>
+        <span id="place-text"></span>
+        <button class="ghost-btn" id="place-cancel">Cancel</button>
+      </div>
       <div class="map-toolbar">
         <div class="toolbar-left">
           <button class="solid-btn near-btn" id="near-me-btn">&#128205; Near me</button>
@@ -153,7 +157,7 @@
 <div class="modal-backdrop" id="unmapped-modal" hidden>
   <div class="modal">
     <h2>Accounts not on the map</h2>
-    <div class="hint">Either never geocoded yet (click Geocode on the brand row) or the address didn't match anything the Census geocoder recognizes -- usually a typo, a missing suite/unit getting in the way, or an address that's genuinely incomplete. Fix the address in your source Excel and re-upload to retry.</div>
+    <div class="hint">Either never geocoded yet (click Geocode on the list row) or the address didn't match anything the Census geocoder recognizes, usually a typo or an incomplete address. You can place a store by hand: paste its coordinates (right-click a spot in Google Maps to copy them) or pick the spot on the map. Hand-placed stores keep their position when you re-upload.</div>
     <div id="unmapped-list" style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;"></div>
     <div class="modal-actions">
       <button class="ghost-btn" id="unmapped-retry-osm">Try free alternate geocoder (OpenStreetMap)</button>

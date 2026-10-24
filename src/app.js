@@ -1,5 +1,5 @@
 import * as db from './core/db.js?v=20261024b';
-import { escapeHtml, normalizeCountyName, loadScriptOnce, newId } from './core/util.js?v=20261024b';
+import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261024b';
 import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024b';
 import { diffLists, describeDiff } from './data/diff.js?v=20261024b';
 import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024b';
@@ -7,6 +7,7 @@ import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnaps
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible, closeDetailPanel, isDetailOpen,
+  beginPlacement, cancelPlacement, isPlacing,
 } from './modules/mapView.js?v=20261024b';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
@@ -942,7 +943,7 @@ async function handleUpload() {
     if (existing) state.accounts.filter((a) => a.brandId === existing.id).forEach((a) => { previousById[a.id] = a; });
     const addressIndex = {};
     state.accounts.forEach((a) => {
-      if (a.geocodeStatus === 'ok' && a.lat !== null && a.lon !== null) {
+      if ((a.geocodeStatus === 'ok' || a.geocodeStatus === 'manual') && a.lat !== null && a.lon !== null) {
         addressIndex[normalizeAddressKey(a.address, a.city, a.state, a.zip)] = { lat: a.lat, lon: a.lon };
       }
     });
@@ -1095,7 +1096,7 @@ async function importSnapshotFiles(files) {
 async function geocodeBrandNow(brandId, btn) {
   const brand = state.brands.find((b) => b.id === brandId);
   const accts = state.accounts.filter((a) => a.brandId === brandId);
-  const pending = accts.filter((a) => a.geocodeStatus !== 'ok');
+  const pending = accts.filter((a) => a.geocodeStatus !== 'ok' && a.geocodeStatus !== 'manual');
 
   if (!pending.length) {
     alert(`${brand.name}: all ${accts.length} accounts are already mapped.`);
@@ -1204,10 +1205,72 @@ function openUnmappedModal() {
           <div><strong>${escapeHtml(a.storeName)}</strong> (${escapeHtml(brand ? brand.name : '')})</div>
           <a class="hint" href="${escapeHtml(mapsUrlFor(a))}" target="_blank" rel="noopener" title="Open in Maps -- worth a try even though our geocoder couldn't match it">${escapeHtml(a.address)}, ${escapeHtml(a.city)}, ${escapeHtml(a.state)} ${escapeHtml(a.zip)}</a>
           <div class="chip ${failed ? 'unsold' : ''}" style="width:fit-content">${failed ? 'Address not found' : 'Not yet geocoded'}</div>
+          <div class="place-row">
+            <input type="text" class="place-input" data-id="${escapeHtml(String(a.id))}" placeholder="lat, lon" aria-label="Coordinates for ${escapeHtml(a.storeName)}" autocomplete="off">
+            <button class="prio-btn" data-place="set" data-id="${escapeHtml(String(a.id))}">Set</button>
+            <button class="prio-btn" data-place="pick" data-id="${escapeHtml(String(a.id))}">Pick on map</button>
+          </div>
         </div>`;
     }).join('');
   }
   document.getElementById('unmapped-modal').hidden = false;
+}
+
+// Places an account by hand. A typo that lands outside Michigan asks first.
+async function placeAccount(id, lat, lon) {
+  const acct = state.accounts.find((a) => String(a.id) === String(id));
+  if (!acct) return false;
+  if (!inMichigan(lat, lon) && !confirm(`${lat.toFixed(5)}, ${lon.toFixed(5)} is outside Michigan. Place ${acct.storeName} there anyway?`)) return false;
+  try {
+    await db.putAccounts([{ ...acct, lat, lon, geocodeStatus: 'manual' }]);
+    await loadAll();
+    render();
+  } catch (err) {
+    alert(`Could not save the position: ${err.message}`);
+    return false;
+  }
+  return true;
+}
+
+async function unmappedListClick(ev) {
+  const btn = ev.target.closest('[data-place]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const acct = state.accounts.find((a) => String(a.id) === id);
+  if (!acct) return;
+  if (btn.dataset.place === 'set') {
+    const input = [...document.querySelectorAll('#unmapped-list .place-input')].find((x) => x.dataset.id === id);
+    const point = parseLatLon(input ? input.value : '');
+    if (!point) {
+      document.getElementById('unmapped-retry-status').textContent = `Could not read coordinates for ${acct.storeName}. Type them as lat, lon, for example 42.7325, -84.5555.`;
+      if (input) input.focus();
+      return;
+    }
+    const keep = [...document.querySelectorAll('#unmapped-list .place-input')].filter((x) => x.value && x.dataset.id !== id).map((x) => [x.dataset.id, x.value]);
+    if (await placeAccount(id, point.lat, point.lon)) {
+      openUnmappedModal();
+      // Anything typed into other rows is put back after the list redraws.
+      keep.forEach(([otherId, value]) => {
+        const box = [...document.querySelectorAll('#unmapped-list .place-input')].find((x) => x.dataset.id === otherId);
+        if (box) box.value = value;
+      });
+      document.getElementById('unmapped-retry-status').textContent = `Placed ${acct.storeName}.`;
+    }
+  } else if (btn.dataset.place === 'pick') {
+    document.getElementById('unmapped-modal').hidden = true;
+    startPlacing(acct);
+  }
+}
+
+function startPlacing(acct) {
+  const bar = document.getElementById('place-bar');
+  document.getElementById('place-text').textContent = `Tap the map where ${acct.storeName} is. Zoom in first if you need to.`;
+  bar.hidden = false;
+  beginPlacement(async (point) => {
+    bar.hidden = true;
+    if (!point) return;
+    if (await placeAccount(acct.id, point.lat, point.lon)) focusAccount(acct.id);
+  });
 }
 
 // Andrew, 2026-08-21: free fallback for whatever the Census batch geocoder
@@ -1384,6 +1447,7 @@ const MODAL_CLOSERS = {
 // Escape closes the top-most thing that is open.
 function onEscape(ev) {
   if (ev.key !== 'Escape') return;
+  if (isPlacing()) { cancelPlacement(); return; }
   const modal = [...document.querySelectorAll('.modal-backdrop')].find((m) => !m.hidden);
   if (modal) { (MODAL_CLOSERS[modal.id] || (() => { modal.hidden = true; }))(); return; }
   if (!document.getElementById('sku-panel').hidden) { closeSkuPanel(); return; }
@@ -1451,6 +1515,15 @@ function wireUi() {
   });
 
   document.getElementById('unmapped-badge').addEventListener('click', openUnmappedModal);
+  document.getElementById('unmapped-list').addEventListener('click', unmappedListClick);
+  document.getElementById('unmapped-list').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && ev.target.classList.contains('place-input')) {
+      ev.preventDefault();
+      const btn = [...document.querySelectorAll('#unmapped-list [data-place="set"]')].find((b) => b.dataset.id === ev.target.dataset.id);
+      if (btn) btn.click();
+    }
+  });
+  document.getElementById('place-cancel').addEventListener('click', cancelPlacement);
   document.getElementById('unmapped-close').addEventListener('click', MODAL_CLOSERS['unmapped-modal']);
   document.getElementById('unmapped-export').addEventListener('click', () => {
     exportFilteredAccounts(unmappedAccounts(), brandsById(), 'account-atlas-unmapped.csv');

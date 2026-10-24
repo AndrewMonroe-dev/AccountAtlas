@@ -18,6 +18,7 @@ const MI_ZOOM = 6;
 const PIN_TOLERANCE_PX = 22;
 const COUNTY_FIT_PADDING = [40, 40];
 let pinEntries = [];
+let placing = null;         // callback while the next tap places an account, else null
 let pinsVisible = true;
 let routeLayer = null;
 let userLayer = null;
@@ -57,6 +58,7 @@ export async function initMap(containerId, {
   // panel. Pins, route badges and county shapes stop their own clicks from
   // reaching here, so opening a store is never undone by the same tap.
   map.on('click', (e) => {
+    if (takePlacement(e.latlng)) return;
     const hit = nearestPin(e.containerPoint);
     if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
     hideDetailPanel();
@@ -138,6 +140,7 @@ export function renderChoropleth(countyStats, heat = null, shadeOn = true) {
         // (no zoom to the county in the same tap).
         layer.on('click', (e) => {
           L.DomEvent.stopPropagation(e);
+          if (takePlacement(e.latlng)) return;
           const hit = nearestPin(e.containerPoint);
           if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
           if (detailPanel && !detailPanel.hidden) { hideDetailPanel(); return; }
@@ -202,6 +205,7 @@ export function renderPins(accounts, brandsById) {
     marker.on('mouseover', () => showDetailPanel(acct, brand));
     marker.on('click', (e) => {
       L.DomEvent.stopPropagation(e);
+      if (takePlacement(e.latlng)) return;
       showDetailPanel(acct, brand, { pin: true });
     });
     markers.push(marker);
@@ -265,6 +269,36 @@ function showDetailPanel(acct, brand, { pin = false } = {}) {
       refreshRouteCheckbox();
     });
   }
+}
+
+// Placing an account by hand: the next tap on the map (a county, an empty spot,
+// a pin or a gray business) is handed to onDone as { lat, lon }. cancelPlacement
+// hands it null instead.
+export function beginPlacement(onDone) {
+  if (!map) return;
+  cancelPlacement();
+  hideDetailPanel();
+  placing = onDone;
+  map.getContainer().classList.add('placing');
+}
+
+export function cancelPlacement() {
+  if (!placing) return;
+  const done = placing;
+  placing = null;
+  if (map) map.getContainer().classList.remove('placing');
+  done(null);
+}
+
+export function isPlacing() { return !!placing; }
+
+function takePlacement(latlng) {
+  if (!placing) return false;
+  const done = placing;
+  placing = null;
+  map.getContainer().classList.remove('placing');
+  done({ lat: latlng.lat, lon: latlng.lng });
+  return true;
 }
 
 export function closeDetailPanel() { hideDetailPanel(); }
@@ -363,6 +397,7 @@ function detailHtml(acct, brand) {
       <div class="pname">${escapeHtml(acct.storeName)}</div>
       <label class="route-add"><input type="checkbox" id="route-check"> <span>Add to route</span> <span class="route-stop-num" id="route-stop-num"></span></label>
       <a class="paddr" href="${mapsUrlFor(acct)}" target="_blank" rel="noopener" title="Open in Maps">${escapeHtml(acct.county || '')} County &middot; ${escapeHtml(acct.address)}, ${escapeHtml(acct.city)}</a>
+      ${acct.geocodeStatus === 'manual' ? '<div class="placed-note">Placed by hand</div>' : ''}
       <div class="fam">${escapeHtml(brand ? brand.name : '')} &mdash; sold (${soldSkus.length})</div>
       <div class="chip-row">${soldSkus.length ? soldSkus.map((s) => chip(s, '')).join('') : '<span class="chip-empty">none</span>'}</div>
       <div class="fam">${escapeHtml(brand ? brand.name : '')} &mdash; unsold (${unsoldSkus.length})</div>
@@ -579,6 +614,8 @@ function redrawNearby() {
     marker.getPopup()._place = p;
     marker.on('click', (e) => {
       L.DomEvent.stopPropagation(e);
+      // While placing an account, tapping a gray business puts it right there.
+      if (takePlacement(marker.getLatLng())) return;
       hideDetailPanel();
     });
     marker.addTo(nearbyLayer);

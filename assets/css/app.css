@@ -363,3 +363,19 @@ button, input, select { font: inherit; color: inherit; }
 
 .route-legs { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 12px; color: var(--ink-dim); cursor: pointer; }
 .route-legs input { width: 18px; height: 18px; flex: none; accent-color: var(--accent); }
+
+/* Placing an account by hand: crosshair cursor and a banner over the map. */
+#leaflet-map.placing, #leaflet-map.placing .leaflet-interactive { cursor: crosshair; }
+.place-bar {
+  position: absolute; z-index: 900; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  width: max-content; max-width: calc(100% - 24px); padding: 8px 12px; background: var(--panel); border: 1.5px solid var(--accent);
+  border-radius: 10px; box-shadow: var(--shadow); font-size: 13px; color: var(--ink);
+}
+.place-bar[hidden] { display: none; }
+.place-bar .ghost-btn { padding: 6px 10px; flex: none; }
+.place-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.place-row .place-input {
+  flex: 1 1 140px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font-size: 13px;
+}
+.place-row .prio-btn { min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font-size: 12.5px; cursor: pointer; }
+.placed-note { font-size: 10.5px; color: var(--accent); margin: -4px 0 6px; }

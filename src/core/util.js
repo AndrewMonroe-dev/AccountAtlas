@@ -58,3 +58,27 @@ export function newId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID();
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
+
+// A rough box around Michigan, used only to catch a typo such as a swapped or
+// mistyped coordinate before it puts a store in another state.
+export function inMichigan(lat, lon) {
+  return lat >= 41.6 && lat <= 48.4 && lon >= -90.6 && lon <= -82.0;
+}
+
+// Reads "42.7325, -84.5555" in the ways people paste it (comma, space, brackets,
+// Google Maps degree text). Returns { lat, lon } or null. A longitude-first
+// paste is swapped back when only that order lands in Michigan.
+export function parseLatLon(text) {
+  const raw = String(text ?? '');
+  const nums = raw.match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length !== 2) return null;
+  let [a, b] = nums.map(Number);
+  // "84.5 W" style text carries its sign in a letter.
+  if (/w/i.test(raw) && b > 0) b = -b;
+  if (!(Math.abs(a) <= 90 && Math.abs(b) <= 180)) {
+    if (Math.abs(b) <= 90 && Math.abs(a) <= 180) return inMichigan(b, a) ? { lat: b, lon: a } : null;
+    return null;
+  }
+  if (!inMichigan(a, b) && inMichigan(b, a)) return { lat: b, lon: a };
+  return { lat: a, lon: b };
+}

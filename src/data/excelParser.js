@@ -139,10 +139,11 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId, { previousById 
     let lat = null;
     let lon = null;
     let geocodeStatus = 'pending';
-    if (prev && prev.geocodeStatus === 'ok' && prev.lat !== null && prev.lon !== null) {
+    if (prev && (prev.geocodeStatus === 'ok' || prev.geocodeStatus === 'manual') && prev.lat !== null && prev.lon !== null) {
       // Same brand, same id (same store number/name/address) -- carry the
-      // existing geocode forward instead of wiping it on re-upload.
-      lat = prev.lat; lon = prev.lon; geocodeStatus = 'ok';
+      // existing geocode (or a point placed by hand) forward instead of wiping
+      // it on re-upload.
+      lat = prev.lat; lon = prev.lon; geocodeStatus = prev.geocodeStatus;
     } else if (cached) {
       // A different brand already geocoded this exact address.
       lat = cached.lat; lon = cached.lon; geocodeStatus = 'ok';
