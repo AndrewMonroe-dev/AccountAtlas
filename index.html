@@ -9,21 +9,33 @@
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1a33">
+<script>
+  // Skip the launch splash after the first load in a tab and when the phone asks for reduced motion.
+  try {
+    if (sessionStorage.getItem('aa-splash-seen') || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.documentElement.classList.add('no-splash');
+    }
+  } catch (e) { /* storage blocked: the splash just plays */ }
+</script>
 
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="vendor/markercluster/MarkerCluster.css" />
 <link rel="stylesheet" href="vendor/markercluster/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261024c">
-<link rel="stylesheet" href="assets/css/app.css?v=20261024c">
-<link rel="stylesheet" href="assets/css/map.css?v=20261024c">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261024e">
+<link rel="stylesheet" href="assets/css/app.css?v=20261024e">
+<link rel="stylesheet" href="assets/css/map.css?v=20261024e">
 </head>
 <body>
+<div class="splash" id="splash" aria-hidden="true">
+  <span class="aa-logo splash-logo"><img class="sq" src="assets/icons/logo-square.png" alt=""><img class="gl" src="assets/icons/logo-glyph.png" alt=""></span>
+</div>
 <div class="app-error" id="app-error" role="alert" hidden><span class="app-error-text"></span><button id="app-error-close" aria-label="Dismiss">&times;</button></div>
 <div class="app">
   <header class="topbar">
     <!-- Phone width: the sidebar is an off-canvas drawer, this opens and closes it. -->
     <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Toggle menu">&#9776;</button>
+    <span class="aa-logo header-logo" id="header-logo" aria-hidden="true"><img class="sq" src="assets/icons/logo-square.png" alt=""><img class="gl" src="assets/icons/logo-glyph.png" alt=""></span>
     <div class="wordmark">
       <span class="name serif">Account Atlas</span>
       <span class="place">Michigan Coverage</span>
@@ -190,6 +202,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/markercluster/leaflet.markercluster.js"></script>
-<script type="module" src="src/app.js?v=20261024c"></script>
+<script type="module" src="src/app.js?v=20261024e"></script>
 </body>
 </html>

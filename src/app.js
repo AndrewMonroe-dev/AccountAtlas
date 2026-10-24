@@ -1,24 +1,25 @@
-import * as db from './core/db.js?v=20261024c';
-import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261024c';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024c';
-import { diffLists, describeDiff } from './data/diff.js?v=20261024c';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024c';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024c';
+import './modules/splash.js?v=20261024e';
+import * as db from './core/db.js?v=20261024e';
+import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261024e';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024e';
+import { diffLists, describeDiff } from './data/diff.js?v=20261024e';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024e';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024e';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible, closeDetailPanel, isDetailOpen,
   beginPlacement, cancelPlacement, isPlacing,
-} from './modules/mapView.js?v=20261024c';
+} from './modules/mapView.js?v=20261024e';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261024c';
+} from './modules/heatmap.js?v=20261024e';
 import {
   IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry, setOnPremise,
-} from './modules/priorities.js?v=20261024c';
-import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261024c';
+} from './modules/priorities.js?v=20261024e';
+import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261024e';
 import {
   MAX_STOPS, LEG_SIZE, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, routeLegs, legUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261024c';
+} from './modules/route.js?v=20261024e';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 

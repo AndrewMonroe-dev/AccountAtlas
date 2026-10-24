@@ -12,7 +12,7 @@
 //
 // VERSION is rewritten by `npm run bump` together with the ?v= markers.
 
-const VERSION = '20261024c';
+const VERSION = '20261024e';
 const CACHE = `aa-shell-${VERSION}`;
 const NEARBY_DATA_VERSION = '20261020'; // keep equal to NEARBY_DATA_VERSION in src/modules/mapView.js
 const NETWORK_TIMEOUT_MS = 4000;
@@ -38,6 +38,7 @@ const SHELL = [
   v('src/modules/mapView.js'),
   v('src/modules/priorities.js'),
   v('src/modules/route.js'),
+  v('src/modules/splash.js'),
   'vendor/leaflet/leaflet.js',
   'vendor/leaflet/leaflet.css',
   'vendor/markercluster/leaflet.markercluster.js',
@@ -51,6 +52,8 @@ const SHELL = [
   'assets/icons/icon-192.png',
   'assets/icons/icon-512.png',
   'assets/icons/apple-touch-icon.png',
+  'assets/icons/logo-square.png',
+  'assets/icons/logo-glyph.png',
 ];
 
 // Read by the unit test, which checks this list against the real files.
