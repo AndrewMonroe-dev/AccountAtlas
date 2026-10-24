@@ -68,6 +68,7 @@ await page.goto(BASE);
 await page.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached' });
 check('page loads with no script errors', errors.length === 0, errors.join(' | '));
 check('no CDN requests (everything local)', external.length === 0, external.join(' | '));
+check('no service worker on localhost by default', (await page.evaluate(() => navigator.serviceWorker.getRegistrations())).length === 0);
 check('xlsx not loaded until upload', await page.evaluate(() => typeof window.XLSX === 'undefined'));
 check('compare/gap/review UI removed', (await page.locator('#compare-segmented, #gap-form, #review-badge, #review-modal').count()) === 0);
 
@@ -313,6 +314,42 @@ await page.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached
 const keys = await page.evaluate(() => Object.keys(localStorage));
 check('clear all removes the route key', !keys.includes('aa-route-v1'), keys.join(','));
 check('clear all leaves no lists', (await page.locator('.brand-row').count()) === 0);
+
+// ---- offline shell: install with signal, then open with none
+const offCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+const op = await offCtx.newPage();
+const offErrors = [];
+op.on('pageerror', (e) => offErrors.push(e.message));
+op.on('dialog', (d) => d.accept());
+await op.goto(BASE + '?sw=1');
+await op.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached' });
+await op.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+await op.reload();
+await op.waitForFunction(() => !!navigator.serviceWorker.controller);
+const cached = await op.evaluate(async () => {
+  const names = await caches.keys();
+  const cache = await caches.open(names[0]);
+  return { names, count: (await cache.keys()).length };
+});
+check('the shell is cached under one versioned name', cached.names.length === 1 && /^aa-shell-\d{8}[a-z]$/.test(cached.names[0]), cached.names.join(','));
+check('the whole shell is cached (30 files)', cached.count >= 30, String(cached.count));
+await op.click('#add-brand-btn');
+await op.fill('#upload-name', 'Offline List');
+await op.setInputFiles('#upload-file', xlsxB);
+await op.click('#upload-submit');
+await op.waitForFunction(() => document.querySelectorAll('.brand-row').length === 1);
+await offCtx.setOffline(true);
+await op.reload();
+await op.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached', timeout: 15000 });
+await op.waitForFunction(() => document.querySelectorAll('.brand-row').length === 1, null, { timeout: 15000 });
+check('offline reload opens the app with its stored list', (await op.textContent('.brand-row .bname')) === 'Offline List');
+check('offline: the county shapes and nearby data are available', await op.evaluate(async () => {
+  const a = await fetch('data/geo/michigan-counties.geojson'); const b = await fetch('data/nearby/michigan-places.json?v=20261020');
+  return a.ok && b.ok;
+}));
+check('offline: no script errors', offErrors.length === 0, offErrors.join('|'));
+await offCtx.setOffline(false);
+await offCtx.close();
 
 // ---- phone width
 const mobile = await browser.newContext({ viewport: { width: 390, height: 780 }, hasTouch: true });

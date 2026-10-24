@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Bumps the cache-busting marker (?v=YYYYMMDDx) in index.html and every module
-// import under src/, so browsers fetch the new files after a deploy.
+// import under src/, and the VERSION in sw.js, so browsers (and the offline
+// cache) fetch the new files after a deploy.
 //
 // Usage:
 //   node tools/bump.mjs            next marker for today (20261024a, then b, c ...)
@@ -11,7 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MARKER = /\?v=(\d{8}[a-z])/g;
+const MARKER = /(?:\?v=|VERSION = ')(\d{8}[a-z])/g;
 
 function files(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -20,7 +21,7 @@ function files(dir) {
   });
 }
 
-const targets = [path.join(ROOT, 'index.html'), ...files(path.join(ROOT, 'src'))];
+const targets = [path.join(ROOT, 'index.html'), path.join(ROOT, 'sw.js'), ...files(path.join(ROOT, 'src'))];
 const current = new Set();
 targets.forEach((f) => [...fs.readFileSync(f, 'utf8').matchAll(MARKER)].forEach((m) => current.add(m[1])));
 
@@ -36,7 +37,7 @@ if (!/^\d{8}[a-z]$/.test(next)) { console.error('Marker must look like 20261024a
 let changed = 0;
 targets.forEach((f) => {
   const text = fs.readFileSync(f, 'utf8');
-  const out = text.replace(MARKER, `?v=${next}`);
+  const out = text.replace(MARKER, (m, old) => m.replace(old, next));
   if (out !== text) { fs.writeFileSync(f, out); changed += 1; }
 });
 console.log(`Marker ${[...current].join(', ') || '(none)'} -> ${next} in ${changed} file(s).`);

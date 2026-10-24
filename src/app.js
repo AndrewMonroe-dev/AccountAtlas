@@ -1,24 +1,24 @@
-import * as db from './core/db.js?v=20261024b';
-import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261024b';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024b';
-import { diffLists, describeDiff } from './data/diff.js?v=20261024b';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024b';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024b';
+import * as db from './core/db.js?v=20261024c';
+import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261024c';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024c';
+import { diffLists, describeDiff } from './data/diff.js?v=20261024c';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024c';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024c';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible, closeDetailPanel, isDetailOpen,
   beginPlacement, cancelPlacement, isPlacing,
-} from './modules/mapView.js?v=20261024b';
+} from './modules/mapView.js?v=20261024c';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261024b';
+} from './modules/heatmap.js?v=20261024c';
 import {
   IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry, setOnPremise,
-} from './modules/priorities.js?v=20261024b';
-import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261024b';
+} from './modules/priorities.js?v=20261024c';
+import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261024c';
 import {
   MAX_STOPS, LEG_SIZE, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, routeLegs, legUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261024b';
+} from './modules/route.js?v=20261024c';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -1627,6 +1627,19 @@ function wireUi() {
   document.addEventListener('keydown', onEscape);
 }
 
+// The offline shell (sw.js). Not used on this computer's own address, where a
+// cached copy would hide edits while developing, and any old one is removed.
+// Add ?sw=1 to the address to test it there.
+function registerOffline() {
+  if (!('serviceWorker' in navigator)) return;
+  const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (local && !/[?&]sw=1\b/.test(location.search)) {
+    navigator.serviceWorker.getRegistrations().then((list) => list.forEach((r) => r.unregister())).catch(() => {});
+    return;
+  }
+  navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode simply stays off */ });
+}
+
 async function start() {
   // Clicking a county on the map navigates there ONLY -- it must never
   // silently filter the data too. That combination is exactly what made
@@ -1651,6 +1664,7 @@ async function start() {
   renderRouteBar();
   renderRouteStops(routeStops);
   wireUi();
+  registerOffline();
 
   // Once there is data worth protecting, ask the browser not to evict it.
   if (state.brands.length && navigator.storage && navigator.storage.persist) {

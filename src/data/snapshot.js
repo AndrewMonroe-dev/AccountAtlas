@@ -5,7 +5,7 @@
 // with no installs allowed) -- geocode once wherever Node is available,
 // then import the finished result anywhere with just a browser.
 
-import { escapeHtml, downloadBlob, safeFileName } from '../core/util.js?v=20261024b';
+import { escapeHtml, downloadBlob, safeFileName } from '../core/util.js?v=20261024c';
 
 export function exportBrandSnapshot(brand, accounts) {
   const snapshot = {
