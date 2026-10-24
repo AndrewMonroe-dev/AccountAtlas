@@ -80,3 +80,20 @@ test('formatAmount', () => {
   assert.equal(formatAmount(1.234), '1.23');
   assert.equal(formatAmount(NaN), '0');
 });
+
+test('route legs: 4 stops each, later legs start at the previous destination', async () => {
+  const { routeLegs, legUrl, LEG_SIZE } = await import('../src/modules/route.js');
+  const stops = Array.from({ length: 10 }, (_, i) => ({ id: 's' + i, lat: 42 + i, lon: -84 }));
+  assert.equal(LEG_SIZE, 4);
+  assert.deepEqual(routeLegs(stops).map((l) => l.length), [4, 4, 2]);
+  const first = legUrl(stops, 0);
+  assert.ok(!first.includes('origin='));
+  assert.match(first, /destination=45\.000000%2C-84\.000000/);
+  assert.equal((first.match(/%7C/g) || []).length, 2);
+  const second = legUrl(stops, 1);
+  assert.match(second, /origin=45\.000000%2C-84\.000000/);
+  assert.match(second, /destination=49\.000000%2C-84\.000000/);
+  assert.match(legUrl(stops, 2), /origin=49\.000000%2C-84\.000000&|origin=49\.000000%2C-84\.000000$/);
+  assert.equal(legUrl(stops, 3), null);
+  assert.equal(routeLegs([]).length, 0);
+});

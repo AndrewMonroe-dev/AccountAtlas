@@ -1,6 +1,7 @@
 import * as db from './core/db.js?v=20261024b';
 import { escapeHtml, normalizeCountyName, loadScriptOnce, newId } from './core/util.js?v=20261024b';
 import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024b';
+import { diffLists, describeDiff } from './data/diff.js?v=20261024b';
 import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024b';
 import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024b';
 import {
@@ -15,7 +16,7 @@ import {
 } from './modules/priorities.js?v=20261024b';
 import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261024b';
 import {
-  MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
+  MAX_STOPS, LEG_SIZE, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, routeLegs, legUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
 } from './modules/route.js?v=20261024b';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
@@ -713,6 +714,9 @@ function closeBrief() {
 // browser for that calculation, never stored or sent anywhere.
 
 let routeStops = loadRoute();
+let legIndex = 0;   // next leg to open when Short legs is on
+const LEGS_KEY = 'aa-route-legs-v1';
+let legsOn = (() => { try { return localStorage.getItem(LEGS_KEY) === 'on'; } catch { return false; } })();
 let nearRows = [];   // [{ acct, miles }] from the last Near me search
 
 function routePositionOf(id) {
@@ -754,6 +758,7 @@ function routePositionOfPlace(place) {
 }
 
 function commitRoute() {
+  legIndex = 0;
   saveRoute(routeStops);
   renderRouteBar();
   renderRouteStops(routeStops);
@@ -780,6 +785,22 @@ function renderRouteBar() {
   document.getElementById('route-optimize').disabled = routeStops.length < 2;
   document.getElementById('route-brief').disabled = routeStops.length === 0;
   document.getElementById('route-start').disabled = routeStops.length === 0;
+  document.getElementById('route-legs').checked = legsOn;
+  updateStartButton();
+}
+
+// With Short legs on and more than one leg, the button opens the next leg.
+function legCount() {
+  return legsOn && routeStops.length > LEG_SIZE ? routeLegs(routeStops).length : 1;
+}
+
+function updateStartButton() {
+  const btn = document.getElementById('route-start');
+  const n = legCount();
+  if (n === 1) { btn.textContent = 'Start route'; return; }
+  const from = legIndex * LEG_SIZE + 1;
+  const to = Math.min(routeStops.length, (legIndex + 1) * LEG_SIZE);
+  btn.textContent = `Start leg ${legIndex + 1} of ${n} (stops ${from} to ${to})`;
 }
 
 function getPosition() {
@@ -818,7 +839,14 @@ async function optimizeRoute() {
 }
 
 function startRoute() {
-  const url = googleRouteUrl(routeStops);
+  let url;
+  if (legCount() > 1) {
+    url = legUrl(routeStops, legIndex);
+    legIndex = (legIndex + 1) % legCount();
+    updateStartButton();
+  } else {
+    url = googleRouteUrl(routeStops);
+  }
   if (!url) return;
   // Synthetic anchor click rather than window.open, which some browsers'
   // popup blockers silently kill (see the MacBane launcher fix, 2026-08-21).
@@ -929,7 +957,8 @@ async function handleUpload() {
       return;
     }
 
-    if (existing && !confirm(`"${name}" already exists (${Object.keys(previousById).length} accounts). Replace it with this file (${parsed.accounts.length} accounts)?`)) {
+    const diff = existing ? diffLists(Object.values(previousById), existing.skuList || [], parsed.accounts, parsed.skuList) : null;
+    if (existing && !confirm(`"${name}" already exists. Replace it with this file?\n\n${describeDiff(diff)}`)) {
       message.textContent = '';
       return;
     }
@@ -1373,6 +1402,12 @@ function wireUi() {
   document.getElementById('brief-body').addEventListener('change', briefChange);
   document.getElementById('brief-modal').addEventListener('click', (ev) => { if (ev.target.id === 'brief-modal') closeBrief(); });
   document.getElementById('route-start').addEventListener('click', startRoute);
+  document.getElementById('route-legs').addEventListener('change', (ev) => {
+    legsOn = ev.target.checked;
+    try { localStorage.setItem(LEGS_KEY, legsOn ? 'on' : 'off'); } catch { /* storage blocked */ }
+    legIndex = 0;
+    updateStartButton();
+  });
   document.getElementById('route-clear').addEventListener('click', () => {
     routeStops = [];
     setRouteStatus('');

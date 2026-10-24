@@ -90,15 +90,36 @@ export function pathMiles(points, order, start) {
 // its own place database and answered "can't seem to find that place" for
 // the addresses typed into the source spreadsheets (reported 2026-10-21).
 // Coordinates can't be misread, and every stop on a route is already mapped.
-export function googleRouteUrl(stops) {
+//
+// origin (optional) is the starting point for a later leg of a long route.
+export function googleRouteUrl(stops, origin = null) {
   if (!stops.length) return null;
   const enc = encodeURIComponent;
   const point = (s) => enc(`${s.lat.toFixed(6)},${s.lon.toFixed(6)}`);
   const last = stops[stops.length - 1];
   let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${point(last)}`;
+  if (origin) url += `&origin=${point(origin)}`;
   const waypoints = stops.slice(0, -1).map(point);
   if (waypoints.length) url += `&waypoints=${waypoints.join('%7C')}`;
   return url;
+}
+
+// A long route split into legs of LEG_SIZE stops (the last stop of a leg is its
+// destination). Google documents only 3 waypoints on mobile browsers, so short
+// legs are the safe way to drive 10 stops from a phone. Each later leg starts
+// at the previous leg's destination.
+export const LEG_SIZE = 4;
+
+export function routeLegs(stops, size = LEG_SIZE) {
+  const legs = [];
+  for (let i = 0; i < stops.length; i += size) legs.push(stops.slice(i, i + size));
+  return legs;
+}
+
+export function legUrl(stops, index, size = LEG_SIZE) {
+  const legs = routeLegs(stops, size);
+  if (index < 0 || index >= legs.length) return null;
+  return googleRouteUrl(legs[index], index > 0 ? legs[index - 1][legs[index - 1].length - 1] : null);
 }
 
 export function stopFromAccount(acct) {

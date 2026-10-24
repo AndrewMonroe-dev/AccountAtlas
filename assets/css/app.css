@@ -360,3 +360,6 @@ button, input, select { font: inherit; color: inherit; }
 }
 .app-error[hidden] { display: none; }
 .app-error button { border: none; background: none; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; padding: 2px 8px; }
+
+.route-legs { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 12px; color: var(--ink-dim); cursor: pointer; }
+.route-legs input { width: 18px; height: 18px; flex: none; accent-color: var(--accent); }

@@ -59,6 +59,11 @@ await page.route('**/api/geocode', async (route) => {
   await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ results }) });
 });
 
+await page.addInitScript(() => {
+  window.__opened = [];
+  const real = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () { if (this.target === '_blank') { window.__opened.push(this.href); return; } return real.call(this); };
+});
 await page.goto(BASE);
 await page.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached' });
 check('page loads with no script errors', errors.length === 0, errors.join(' | '));
@@ -126,11 +131,22 @@ check('old list untouched after a failed re-upload', /120 accounts/.test(subAfte
 await page.keyboard.press('Escape');
 check('Escape closes the upload modal', await page.locator('#upload-modal').isHidden());
 
-// ---- good re-upload replaces and keeps geocodes
+// ---- good re-upload replaces and keeps geocodes, and the confirm says what changes
+dialogs.length = 0;
 await upload('List A', xlsxA);
 await page.waitForFunction(() => document.querySelector('#upload-modal').hidden);
 const subRe = await page.textContent('.brand-row .bsub');
 check('re-upload keeps existing geocodes', /11\d mapped/.test(subRe), subRe);
+check('re-upload confirm describes the diff (no changes)', dialogs.some((d) => /No changes from the stored list \(120 accounts\)/.test(d)), dialogs.join(' / '));
+dialogs.length = 0;
+const xlsxChanged = write('list-a2.xlsx', rows(130).map((r, i) => (i === 0 ? [...r, 'Brand New SKU'] : [...r, i % 2 ? 'Y' : '-'])));
+await upload('List A', xlsxChanged);
+await page.waitForFunction(() => document.querySelector('#upload-modal').hidden);
+check('re-upload confirm lists new accounts and SKUs', dialogs.some((d) => /10 new, 0 gone/.test(d) && /Brand New SKU/.test(d)), dialogs.join(' / '));
+await upload('List A', xlsxA);
+await page.waitForFunction(() => document.querySelector('#upload-modal').hidden);
+check('re-upload confirm reports the accounts that went away', dialogs.some((d) => /0 new, 10 gone/.test(d)), dialogs.join(' / '));
+
 
 // ---- second list, chips
 await upload('List B', xlsxB);
@@ -190,6 +206,35 @@ await (await chooser).setFiles(backupPath);
 await page.waitForFunction(() => document.querySelectorAll('.brand-row').length === 1);
 check('backup imports back', true);
 check('imported coordinates survive', /11\d mapped|\d\d mapped/.test(await page.textContent('.brand-row .bsub')));
+
+// ---- short route legs
+await page.keyboard.press('Escape');
+await page.evaluate(() => {
+  const stops = Array.from({ length: 9 }, (_, i) => ({ id: 'leg' + i, name: 'Leg stop ' + (i + 1), lat: 42.5 + i * 0.05, lon: -84.5, query: 'q' }));
+  localStorage.setItem('aa-route-v1', JSON.stringify(stops));
+});
+await page.reload();
+await page.waitForSelector('#route-bar:not([hidden])');
+check('9 stops, legs off: one Start route button', (await page.textContent('#route-start')).trim() === 'Start route');
+await page.check('#route-legs');
+check('legs on: button names leg 1 of 3', /Start leg 1 of 3 \(stops 1 to 4\)/.test(await page.textContent('#route-start')), await page.textContent('#route-start'));
+await page.evaluate(() => { window.__opened.length = 0; });
+await page.click('#route-start');
+await page.click('#route-start');
+await page.click('#route-start');
+const links = await page.evaluate(() => window.__opened);
+check('three legs open three links', links.length === 3, String(links.length));
+check('first leg has no origin and 3 waypoints', !/origin=/.test(links[0]) && (links[0].match(/%7C/g) || []).length === 2, links[0]);
+check('second leg starts at stop 4', /origin=42\.650000%2C-84\.500000/.test(links[1]) && /destination=42\.850000/.test(links[1]), links[1]);
+check('third leg ends at stop 9', /destination=42\.900000/.test(links[2]), links[2]);
+check('after the last leg the button wraps to leg 1', /Start leg 1 of 3/.test(await page.textContent('#route-start')));
+await page.reload();
+await page.waitForSelector('#route-bar:not([hidden])');
+check('legs choice is remembered', await page.isChecked('#route-legs'));
+await page.uncheck('#route-legs');
+await page.evaluate(() => { localStorage.removeItem('aa-route-v1'); });
+await page.reload();
+await page.waitForSelector('#leaflet-map .leaflet-tile-pane', { state: 'attached' });
 
 // ---- standalone viewer export reads Leaflet from the repo and opens on its own
 const [vdl] = await Promise.all([page.waitForEvent('download'), page.click('[data-action="export-viewer"]')]);
