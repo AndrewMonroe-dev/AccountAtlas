@@ -36,8 +36,8 @@ html:not(.no-splash):not(.logo-ready) .header-logo { visibility: hidden; animati
 .splash.flying { background-color: transparent; }
 .no-splash .splash { display: none; }
 .splash-logo { width: min(40vw, 170px); transition: transform .65s cubic-bezier(.5, 0, .2, 1); transform-origin: center; }
-.splash-logo .gl { animation: aa-spin 1.5s cubic-bezier(.45, 0, .2, 1) both; }
-@keyframes aa-spin { from { transform: rotateY(0); } to { transform: rotateY(720deg); } }
+.splash-logo .gl { animation: aa-spin 1.6s cubic-bezier(.1, .7, .2, 1) both; } /* fast start, long slow-down */
+@keyframes aa-spin { from { transform: rotateY(0); } to { transform: rotateY(1800deg); } }
 @keyframes aa-reveal { to { visibility: visible; } }
 @keyframes aa-splash-out { to { opacity: 0; visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .splash { display: none; } }

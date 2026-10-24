@@ -5,7 +5,7 @@
 // never runs), and this file only measures the header slot and does the flight.
 
 const SEEN_KEY = 'aa-splash-seen';
-const SPIN_MS = 1500;   // matches the aa-spin animation in app.css
+const SPIN_MS = 1700;   // the aa-spin animation in app.css (1.6 s) plus a short hold
 const FLY_MS = 650;     // matches the transition on .splash-logo in app.css
 
 function finish(splash) {
