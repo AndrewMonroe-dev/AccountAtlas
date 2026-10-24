@@ -2,7 +2,7 @@
 // Both live on the same map instance; Leaflet's own zoom handles the
 // transition, no separate "view mode" toggle needed once real tiles are in.
 
-import { formatAmount } from './heatmap.js?v=20261023e';
+import { formatAmount } from './heatmap.js?v=20261024a';
 
 let map = null;
 let countyLayer = null;
