@@ -9,6 +9,8 @@ const FIXED_COLS = [
   'storeName', 'storeNumber', 'address', 'city', 'county', 'state', 'zip',
 ];
 
+const SKU_FIRST_COL = 7; // column H
+
 function normalizeCell(v) {
   if (v === null || v === undefined) return '';
   return String(v).trim();
@@ -59,8 +61,20 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId, { previousById 
   }
 
   const header = rows[0];
-  const skuNames = header.slice(7).map((h) => normalizeCell(h)).filter(Boolean);
-  const skuColOffset = 7; // column H = index 7
+  // Every non-blank header from column H onward is one SKU, remembered with its
+  // own column index so a blank header cell never shifts the columns after it.
+  // A repeated header gets " (2)", " (3)" so the columns stay separate.
+  const skuNames = [];
+  const skuCols = [];
+  const seen = new Map();
+  for (let c = SKU_FIRST_COL; c < header.length; c++) {
+    const base = normalizeCell(header[c]);
+    if (!base) continue;
+    const n = (seen.get(base) || 0) + 1;
+    seen.set(base, n);
+    skuNames.push(n === 1 ? base : `${base} (${n})`);
+    skuCols.push(c);
+  }
 
   // Guard against a missing/deleted header row. Without it, row 1 of real
   // account data gets silently treated as the header -- that account
@@ -113,8 +127,8 @@ export function parseBrandWorkbook(workbookArrayBuffer, brandId, { previousById 
     const skus = {};
     const qty = {};
     skuNames.forEach((sku, i) => {
-      skus[sku] = isSold(row[skuColOffset + i]);
-      qty[sku] = parseQty(row[skuColOffset + i]);
+      skus[sku] = isSold(row[skuCols[i]]);
+      qty[sku] = parseQty(row[skuCols[i]]);
     });
 
     const id = makeAccountId(brandId, rec.storeNumber, rec.storeName, rec.address);

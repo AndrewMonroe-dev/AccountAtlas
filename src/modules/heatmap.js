@@ -6,6 +6,8 @@
 // county's "total" is the sum over its accounts, its "average" is that total
 // divided by ALL the brand's accounts in the county (sold or not).
 
+import { normalizeCountyName } from '../core/util.js?v=20261024b';
+
 const MODE_KEY = 'aa-heat-v1';
 const SKU_OFF_KEY = 'aa-heat-skus-v1';
 
@@ -59,15 +61,16 @@ export function accountVolume(acct, skuSet) {
 }
 
 // accounts: one brand's accounts. skuSet: Set of SKU names to count.
-// Returns { values: Map<county, {volume, accounts, value}>, max, measure, colorFor, legend }.
+// Returns { values: Map<normalized county, {volume, accounts, value}>, max, measure, colorFor, legend }.
 export function countyHeat(accounts, skuSet, measure) {
   const values = new Map();
   accounts.forEach((a) => {
-    if (!a.county) return;
-    const cur = values.get(a.county) || { volume: 0, accounts: 0, value: 0 };
+    const key = normalizeCountyName(a.county);
+    if (!key) return;
+    const cur = values.get(key) || { volume: 0, accounts: 0, value: 0 };
     cur.accounts += 1;
     cur.volume += accountVolume(a, skuSet);
-    values.set(a.county, cur);
+    values.set(key, cur);
   });
   let max = 0;
   values.forEach((v) => {

@@ -1,53 +1,42 @@
-import * as db from './core/db.js?v=20261024a';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024a';
-import { buildMatches } from './data/matcher.js?v=20261024a';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024a';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024a';
+import * as db from './core/db.js?v=20261024b';
+import { escapeHtml, normalizeCountyName, loadScriptOnce, newId } from './core/util.js?v=20261024b';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024b';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024b';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024b';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
-  renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible,
-} from './modules/mapView.js?v=20261024a';
+  renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible, closeDetailPanel, isDetailOpen,
+} from './modules/mapView.js?v=20261024b';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261024a';
+} from './modules/heatmap.js?v=20261024b';
 import {
   IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry, setOnPremise,
-} from './modules/priorities.js?v=20261024a';
-import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261024a';
+} from './modules/priorities.js?v=20261024b';
+import { buildBriefs, splitRows, shortSku } from './modules/brief.js?v=20261024b';
 import {
   MAX_STOPS, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261024a';
+} from './modules/route.js?v=20261024b';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
-// Andrew, 2026-08-21: was a separate `atlasviewer.vesvelid.workers.dev`
-// Cloudflare Worker (tools/cloudflare-worker.js, kept as reference/backup
-// deploy) -- his work computer's network silently blocked that domain
-// ("Failed to fetch", no reachable error detail). Switched to a Cloudflare
-// Pages Function (functions/api/geocode.js, same relay logic) served from
-// the SAME origin as accountatlas.pages.dev -- rides that already-allowed
-// domain at work instead of a separate, unfamiliar one.
-//
-// Andrew, 2026-08-21 (same day, second bug): that same-origin path only
-// exists on Cloudflare Pages -- GitHub Pages (the separate public,
-// no-login deploy used purely to hand the app to colleagues, see
-// andrewmonroe-dev.github.io/AccountAtlas/) is a plain static host with
-// no server-side functions at all, so /api/geocode 404s there. Resolve
-// the relay by hostname instead of hardcoding one: the Pages Function on
-// Cloudflare's own domain, the standalone Worker everywhere else.
-const GEOCODE_RELAY_URL = location.hostname.endsWith('.pages.dev')
-  ? '/api/geocode'
-  : 'https://atlasviewer.vesvelid.workers.dev';
+// Where the Geocode button sends addresses. Anything running this app's own
+// server (the local helper, Cloudflare Pages) answers /api/geocode on the same
+// origin. GitHub Pages is a plain static host with no server code, so it uses
+// the standalone Cloudflare Worker relay (tools/cloudflare-worker.js) instead.
+const GEOCODE_RELAY_URL = location.hostname.endsWith('.github.io')
+  ? 'https://atlasviewer.vesvelid.workers.dev'
+  : '/api/geocode';
+
+// Browser storage keys that belong to the data, wiped by "Clear all data".
+// View preferences (shade mode, dots, nearby) and brand priorities stay.
+const DATA_STORAGE_KEYS = ['aa-route-v1', 'aa-lists-off-v1', 'aa-heat-skus-v1', 'aa-match-overrides'];
 
 const state = {
   brands: [],           // [{id, name, color}]
   accounts: [],          // all accounts, all brands
-  matchGroups: [],
   activeBrandIds: new Set(),
-  compareMode: 'overlay', // 'overlay' | 'gap'
-  gapHas: null,
-  gapMissing: null,
-  filterCounty: '',
+  filterCounty: '',      // normalized county key, '' = every county
   heatMode: loadHeatMode(), // 'sold' (penetration) | 'total' | 'avg' (volume heatmap)
   heatOn: loadHeatOn(),     // county shading drawn on the map
   dotsOn: loadDotsOn(),     // account dots drawn on the map
@@ -87,47 +76,35 @@ function setBrandActive(id, on) {
   syncActiveBrands();
 }
 
+// Lists come back from storage in random id order, so they are sorted by when
+// they were first added. That keeps "the first list that is on" (the heatmap
+// list) and the automatic master list the same from one launch to the next.
+function byCreation(a, b) {
+  const when = (x) => x.createdAt || x.uploadedAt || '';
+  return when(a).localeCompare(when(b)) || a.name.localeCompare(b.name);
+}
+
 async function loadAll() {
-  state.brands = await db.getAllBrands();
-  state.accounts = await db.getAllAccounts();
-  state.matchGroups = await db.getAllMatchGroups();
+  [state.brands, state.accounts] = await Promise.all([db.getAllBrands(), db.getAllAccounts()]);
+  state.brands.sort(byCreation);
   syncActiveBrands();
 }
 
 function visibleAccounts() {
   let accts = state.accounts.filter((a) => state.activeBrandIds.has(a.brandId));
-  if (state.filterCounty) accts = accts.filter((a) => a.county === state.filterCounty);
-
-  if (state.compareMode === 'gap' && state.gapHas && state.gapMissing) {
-    const hasAccts = state.accounts.filter((a) => a.brandId === state.gapHas);
-    const missingAccts = new Set(
-      state.accounts.filter((a) => a.brandId === state.gapMissing).map(matchKeyFor)
-    );
-    const matchedMissingIds = new Set();
-    state.matchGroups.forEach((g) => {
-      const members = g.memberIds.map((id) => state.accounts.find((a) => a.id === id)).filter(Boolean);
-      const inHas = members.some((m) => m.brandId === state.gapHas);
-      const inMissing = members.some((m) => m.brandId === state.gapMissing);
-      if (inHas && inMissing) {
-        members.filter((m) => m.brandId === state.gapHas).forEach((m) => matchedMissingIds.add(m.id));
-      }
-    });
-    accts = hasAccts.filter((a) => !matchedMissingIds.has(a.id));
-    if (state.filterCounty) accts = accts.filter((a) => a.county === state.filterCounty);
-  }
+  if (state.filterCounty) accts = accts.filter((a) => normalizeCountyName(a.county) === state.filterCounty);
   return accts;
 }
-
-function matchKeyFor(a) { return a.id; }
 
 function countyStatsFor(accounts) {
   const map = new Map();
   accounts.forEach((a) => {
-    if (!a.county) return;
-    const cur = map.get(a.county) || { sold: 0, total: 0 };
+    const key = normalizeCountyName(a.county);
+    if (!key) return;
+    const cur = map.get(key) || { sold: 0, total: 0 };
     cur.total += 1;
     if (Object.values(a.skus).some(Boolean)) cur.sold += 1;
-    map.set(a.county, cur);
+    map.set(key, cur);
   });
   return map;
 }
@@ -139,15 +116,14 @@ function countyStatsFor(accounts) {
 function render() {
   renderBrandList();
   renderListChips();
-  renderGapForm();
   renderFilters();
-  renderStats();
-  renderUnmappedBadge();
   const accts = visibleAccounts();
+  renderStats(accts);
+  renderUnmappedBadge();
   const { heat, note, brand } = computeHeat(accts);
   renderHeatBar(note, brand, heat);
   renderChoropleth(countyStatsFor(accts), heat, state.heatOn);
-  renderPins(accts.filter((a) => a.lat !== null), brandsById());
+  renderPins(accts.filter((a) => a.lat !== null && a.lon !== null), brandsById());
   setPinsVisible(state.dotsOn);
 }
 
@@ -273,73 +249,88 @@ function toggleSkuPanel(brand) {
 }
 
 function renderBrandList() {
-  const el = document.getElementById('brand-list');
-  el.innerHTML = '';
-  state.brands.forEach((b) => {
-    const accts = state.accounts.filter((a) => a.brandId === b.id);
-    const geocoded = accts.filter((a) => a.lat !== null).length;
-    const row = document.createElement('div');
-    row.className = 'brand-row';
-    row.innerHTML = `
-      <span class="swatch" style="background:${b.color}"></span>
-      <div class="info">
-        <div class="bname">${escapeHtml(b.name)}</div>
-        <div class="bsub">${accts.length} accounts &middot; ${geocoded} mapped</div>
-      </div>
-      <button class="icon-btn geocode-btn" title="Geocode this brand's accounts" data-action="geocode" data-id="${b.id}">&#128205;</button>
-      <button class="icon-btn" title="Export a portable snapshot (data + coordinates) to move to another computer" data-action="export-snapshot" data-id="${b.id}">&#128190;</button>
-      <button class="icon-btn" title="Export a standalone map viewer -- one HTML file, no login/install needed, safe to send to anyone" data-action="export-viewer" data-id="${b.id}">&#128506;</button>
-      <button class="toggle ${state.activeBrandIds.has(b.id) ? 'on' : ''}" data-action="toggle-brand" data-id="${b.id}"></button>
-    `;
-    el.appendChild(row);
+  const counts = new Map();
+  state.accounts.forEach((a) => {
+    const c = counts.get(a.brandId) || { total: 0, mapped: 0 };
+    c.total += 1;
+    if (a.lat !== null) c.mapped += 1;
+    counts.set(a.brandId, c);
   });
+  document.getElementById('brand-list').innerHTML = state.brands.map((b) => {
+    const c = counts.get(b.id) || { total: 0, mapped: 0 };
+    const id = escapeHtml(String(b.id));
+    return `
+      <div class="brand-row">
+        <span class="swatch" style="background:${escapeHtml(b.color)}"></span>
+        <div class="info">
+          <div class="bname">${escapeHtml(b.name)}</div>
+          <div class="bsub">${c.total} accounts &middot; ${c.mapped} mapped</div>
+        </div>
+        <button class="toggle ${state.activeBrandIds.has(b.id) ? 'on' : ''}" role="switch" aria-checked="${state.activeBrandIds.has(b.id)}" aria-label="Show ${escapeHtml(b.name)} on the map" data-action="toggle-brand" data-id="${id}"></button>
+        <div class="brand-actions">
+          <button class="icon-btn geocode-btn" title="Geocode this list's accounts" aria-label="Geocode ${escapeHtml(b.name)}" data-action="geocode" data-id="${id}">&#128205;</button>
+          <button class="icon-btn" title="Export a portable snapshot (data + coordinates) to move to another computer" aria-label="Export snapshot of ${escapeHtml(b.name)}" data-action="export-snapshot" data-id="${id}">&#128190;</button>
+          <button class="icon-btn" title="Export a standalone map viewer: one HTML file, no login or install needed, safe to send to anyone" aria-label="Export map viewer of ${escapeHtml(b.name)}" data-action="export-viewer" data-id="${id}">&#128506;</button>
+          <button class="icon-btn" title="Delete this list from this browser" aria-label="Delete ${escapeHtml(b.name)}" data-action="delete-list" data-id="${id}">&#128465;</button>
+        </div>
+      </div>`;
+  }).join('');
+}
 
-  el.querySelectorAll('[data-action="toggle-brand"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.id;
-      setBrandActive(id, !state.activeBrandIds.has(id));
-      render();
-    });
-  });
-  el.querySelectorAll('[data-action="geocode"]').forEach((btn) => {
-    btn.addEventListener('click', () => geocodeBrandNow(btn.dataset.id, btn));
-  });
-  el.querySelectorAll('[data-action="export-snapshot"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const brand = state.brands.find((b) => b.id === btn.dataset.id);
-      const accts = state.accounts.filter((a) => a.brandId === brand.id);
-      exportBrandSnapshot(brand, accts);
-    });
-  });
-  el.querySelectorAll('[data-action="export-viewer"]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const brand = state.brands.find((b) => b.id === btn.dataset.id);
-      const accts = state.accounts.filter((a) => a.brandId === brand.id);
-      const originalLabel = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = '…';
-      try {
-        await exportStandaloneViewer(brand, accts);
-      } catch (err) {
-        alert(`Couldn't build the standalone viewer: ${err.message}`);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = originalLabel;
-      }
-    });
-  });
-
-  const gapHasSel = document.getElementById('gap-has');
-  const gapMissingSel = document.getElementById('gap-missing');
-  [gapHasSel, gapMissingSel].forEach((sel) => {
-    sel.innerHTML = state.brands.map((b) => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
-  });
-  if (state.brands.length) {
-    state.gapHas = state.gapHas || state.brands[0].id;
-    state.gapMissing = state.gapMissing || (state.brands[1] || state.brands[0]).id;
-    gapHasSel.value = state.gapHas;
-    gapMissingSel.value = state.gapMissing;
+// One listener for the whole list (set up once), so re-rendering the rows never
+// has to re-attach anything.
+async function brandListClick(ev) {
+  const btn = ev.target.closest('[data-action]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const brand = state.brands.find((b) => String(b.id) === id);
+  if (!brand) return;
+  const action = btn.dataset.action;
+  if (action === 'toggle-brand') {
+    setBrandActive(brand.id, !state.activeBrandIds.has(brand.id));
+    render();
+  } else if (action === 'geocode') {
+    geocodeBrandNow(brand.id, btn);
+  } else if (action === 'export-snapshot') {
+    exportBrandSnapshot(brand, state.accounts.filter((a) => a.brandId === brand.id));
+  } else if (action === 'export-viewer') {
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      await exportStandaloneViewer(brand, state.accounts.filter((a) => a.brandId === brand.id));
+    } catch (err) {
+      alert(`Couldn't build the standalone viewer: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  } else if (action === 'delete-list') {
+    deleteList(brand.id);
   }
+}
+
+async function deleteList(brandId) {
+  const brand = state.brands.find((b) => b.id === brandId);
+  if (!brand) return;
+  const mine = state.accounts.filter((a) => a.brandId === brandId);
+  if (!confirm(`Delete the list "${brand.name}" and its ${mine.length} accounts from this browser?\n\nThis cannot be undone. Re-upload the Excel file to bring it back.`)) return;
+  try {
+    await db.deleteBrand(brandId);
+  } catch (err) {
+    alert(`Could not delete the list: ${err.message}`);
+    return;
+  }
+  const gone = new Set(mine.map((a) => a.id));
+  routeStops = routeStops.filter((s) => !gone.has(s.id));
+  commitRoute();
+  offBrandIds.delete(brandId);
+  saveOffLists();
+  saveSkuOff(brandId, new Set());
+  if (prio.masterBrandId === brandId) setPrio({ ...prio, masterBrandId: null });
+  if (skuPanelBrandId === brandId) closeSkuPanel();
+  await loadAll();
+  render();
 }
 
 // Chip bar above the map: one tap switches a list on or off, any combination.
@@ -376,33 +367,33 @@ function renderListChips() {
   remeasure();
 }
 
-function renderGapForm() {
-  document.getElementById('gap-form').style.display = state.compareMode === 'gap' ? 'flex' : 'none';
-  document.querySelectorAll('#compare-segmented button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.mode === state.compareMode);
-  });
-}
-
 function renderFilters() {
   const sel = document.getElementById('filter-county');
-  const counties = [...new Set(state.accounts.map((a) => a.county).filter(Boolean))].sort();
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">All counties</option>' + counties.map((c) => `<option value="${c}">${c}</option>`).join('');
-  sel.value = state.filterCounty || cur || '';
+  // One entry per county however it was spelled, labelled with its commonest spelling.
+  const spellings = new Map();
+  state.accounts.forEach((a) => {
+    const key = normalizeCountyName(a.county);
+    if (!key) return;
+    const counts = spellings.get(key) || new Map();
+    counts.set(a.county.trim(), (counts.get(a.county.trim()) || 0) + 1);
+    spellings.set(key, counts);
+  });
+  if (state.filterCounty && !spellings.has(state.filterCounty)) state.filterCounty = '';
+  const options = [...spellings.entries()]
+    .map(([key, counts]) => [key, [...counts.entries()].sort((x, y) => y[1] - x[1])[0][0]])
+    .sort((x, y) => x[1].localeCompare(y[1]));
+  sel.innerHTML = '<option value="">All counties</option>'
+    + options.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+  sel.value = state.filterCounty;
   document.getElementById('clear-county-filter').hidden = !state.filterCounty;
 }
 
-function renderStats() {
-  const accts = visibleAccounts();
+function renderStats(accts) {
   const stats = brandStats(accts);
   document.getElementById('stat-sold').textContent = stats.soldAccounts;
   document.getElementById('stat-unsold').textContent = stats.unsoldAccounts;
   document.getElementById('stat-bar').style.width = stats.penetrationPct + '%';
-  document.getElementById('stat-pct').textContent = `${stats.penetrationPct}% penetration${state.compareMode === 'gap' ? ' gap' : ' (visible brands)'}`;
-}
-
-function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  document.getElementById('stat-pct').textContent = `${stats.penetrationPct}% penetration (visible lists)`;
 }
 
 // ---------------------------------------------------------------
@@ -904,59 +895,67 @@ function closeUploadModal() { document.getElementById('upload-modal').hidden = t
 
 async function handleUpload() {
   const name = document.getElementById('upload-name').value.trim();
-  const fileInput = document.getElementById('upload-file');
-  const file = fileInput.files[0];
-  if (!name || !file) { alert('Brand name and a file are both required.'); return; }
+  const file = document.getElementById('upload-file').files[0];
+  const message = document.getElementById('upload-warnings');
+  if (!name || !file) { message.textContent = 'A list name and an Excel file are both required.'; return; }
 
-  const existing = state.brands.find((b) => b.name.toLowerCase() === name.toLowerCase());
-
-  // Build carry-forward data BEFORE anything is deleted: this brand's own
-  // prior accounts (so an unchanged address keeps its geocode on replace),
-  // plus every already-geocoded address across ALL brands (so a new brand
-  // at an already-mapped store skips geocoding entirely).
-  const previousById = {};
-  if (existing) {
-    const oldAccounts = await db.getAccountsByBrand(existing.id);
-    oldAccounts.forEach((a) => { previousById[a.id] = a; });
-  }
-  const addressIndex = {};
-  state.accounts.forEach((a) => {
-    if (a.geocodeStatus === 'ok' && a.lat !== null && a.lon !== null) {
-      addressIndex[normalizeAddressKey(a.address, a.city, a.state, a.zip)] = { lat: a.lat, lon: a.lon };
-    }
-  });
-
-  if (existing) {
-    const ok = confirm(`"${name}" already exists (${state.accounts.filter((a) => a.brandId === existing.id).length} accounts). Replace it?`);
-    if (!ok) return;
-    await db.deleteBrand(existing.id);
-  }
-
-  const buf = await file.arrayBuffer();
-  const brandId = existing ? existing.id : crypto.randomUUID();
-  let parsed;
+  const submit = document.getElementById('upload-submit');
+  submit.disabled = true;
   try {
-    parsed = parseBrandWorkbook(buf, brandId, { previousById, addressIndex });
+    message.textContent = 'Reading the file...';
+    // The spreadsheet reader is large and only needed here, so it loads now.
+    await loadScriptOnce('vendor/xlsx/xlsx.full.min.js');
+
+    const existing = state.brands.find((b) => b.name.toLowerCase() === name.toLowerCase());
+    // Carry-forward data: this list's own prior accounts (an unchanged address
+    // keeps its geocode on replace) and every geocoded address across ALL lists
+    // (a new list at an already-mapped store skips geocoding).
+    const previousById = {};
+    if (existing) state.accounts.filter((a) => a.brandId === existing.id).forEach((a) => { previousById[a.id] = a; });
+    const addressIndex = {};
+    state.accounts.forEach((a) => {
+      if (a.geocodeStatus === 'ok' && a.lat !== null && a.lon !== null) {
+        addressIndex[normalizeAddressKey(a.address, a.city, a.state, a.zip)] = { lat: a.lat, lon: a.lon };
+      }
+    });
+
+    // Parse BEFORE anything is replaced: a bad file must never cost the old list.
+    const brandId = existing ? existing.id : newId();
+    let parsed;
+    try {
+      parsed = parseBrandWorkbook(await file.arrayBuffer(), brandId, { previousById, addressIndex });
+    } catch (err) {
+      message.textContent = 'Could not parse file: ' + err.message;
+      return;
+    }
+
+    if (existing && !confirm(`"${name}" already exists (${Object.keys(previousById).length} accounts). Replace it with this file (${parsed.accounts.length} accounts)?`)) {
+      message.textContent = '';
+      return;
+    }
+
+    const color = existing ? existing.color : BRAND_COLORS[state.brands.length % BRAND_COLORS.length];
+    const now = new Date().toISOString();
+    const createdAt = existing ? (existing.createdAt || existing.uploadedAt || now) : now;
+    await db.replaceBrand({ id: brandId, name, color, skuList: parsed.skuList, uploadedAt: now, createdAt }, parsed.accounts);
+
+    offBrandIds.delete(brandId);
+    saveOffLists();
+    await loadAll();
+    render();
+
+    if (parsed.warnings.length) {
+      const shown = parsed.warnings.slice(0, 20);
+      if (parsed.warnings.length > shown.length) shown.push(`...and ${parsed.warnings.length - shown.length} more.`);
+      message.textContent = `Uploaded ${parsed.accounts.length} accounts.\n` + shown.join('\n');
+    } else {
+      closeUploadModal();
+    }
   } catch (err) {
-    document.getElementById('upload-warnings').textContent = 'Could not parse file: ' + err.message;
-    return;
+    message.textContent = 'Upload failed: ' + err.message;
+  } finally {
+    submit.disabled = false;
   }
-
-  const color = existing ? existing.color : BRAND_COLORS[state.brands.length % BRAND_COLORS.length];
-  await db.putBrand({ id: brandId, name, color, skuList: parsed.skuList, uploadedAt: new Date().toISOString() });
-  await db.putAccounts(parsed.accounts);
-
-  if (parsed.warnings.length) {
-    document.getElementById('upload-warnings').textContent = parsed.warnings.slice(0, 20).join('\n');
-  } else {
-    closeUploadModal();
-  }
-
-  offBrandIds.delete(brandId);
-  saveOffLists();
-  await loadAll();
-  await recomputeMatches();
-  render();
 }
 
 // ---------------------------------------------------------------
@@ -974,92 +973,94 @@ function importSnapshot() {
   input.addEventListener('change', async () => {
     const files = [...input.files];
     if (!files.length) return;
-
-    // Parse everything first. A bad file is reported and skipped, the rest still import.
-    // A list name appearing twice in the batch keeps the last one.
-    const incoming = new Map();
-    const problems = [];
-    let importedPrio = null;
-    for (const file of files) {
-      try {
-        const parsed = await parseSnapshotFile(file);
-        if (parsed.priorities) importedPrio = parsed.priorities;
-        parsed.forEach((list) => incoming.set(list.brand.name.toLowerCase(), list));
-      } catch (err) {
-        problems.push(`${file.name}: ${err.message}`);
-      }
+    try {
+      await importSnapshotFiles(files);
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
     }
-    const lists = [...incoming.values()];
-    if (!lists.length) {
-      alert('Could not import anything.\n' + problems.join('\n'));
-      return;
-    }
-
-    const findExisting = (list) => state.brands.find((b) => b.name.toLowerCase() === list.brand.name.toLowerCase());
-    const clashes = lists.filter(findExisting);
-    let replaceClashes = false;
-    if (clashes.length) {
-      replaceClashes = confirm(
-        `${clashes.length} of these lists already exist: ${clashes.map((l) => l.brand.name).join(', ')}.\n\n` +
-        'OK replaces them with the imported copies. Cancel keeps your current copies and imports only the new lists.'
-      );
-    }
-
-    const done = [];
-    const skipped = [];
-    const freshBrandIds = [];
-    for (const list of lists) {
-      const existing = findExisting(list);
-      if (existing && !replaceClashes) { skipped.push(list.brand.name); continue; }
-      if (existing) await db.deleteBrand(existing.id);
-
-      const brandId = existing ? existing.id : (list.brand.id || crypto.randomUUID());
-      const color = existing ? existing.color : BRAND_COLORS[(state.brands.length + freshBrandIds.length) % BRAND_COLORS.length];
-      await db.putBrand({ ...list.brand, id: brandId, color });
-      await db.putAccounts(list.accounts.map((a) => ({ ...a, brandId })));
-      offBrandIds.delete(brandId);
-      freshBrandIds.push(brandId);
-      done.push(`${list.brand.name} (${list.accounts.length} accounts, ${list.accounts.filter((a) => a.lat !== null && a.lon !== null).length} mapped)`);
-    }
-    saveOffLists();
-
-    await loadAll();
-    await recomputeMatches();
-
-    // Brand priorities in a backup: applied silently over untouched defaults,
-    // otherwise only after a confirm, so a restore never wipes edits unasked.
-    let prioNote = '';
-    if (importedPrio) {
-      const incomingPrio = cleanPriorities(importedPrio);
-      const wanted = String(importedPrio.masterBrandName || '').toLowerCase();
-      const master = wanted ? state.brands.find((b) => b.name.toLowerCase() === wanted) : null;
-      incomingPrio.masterBrandId = master ? master.id : null;
-      const untouched = JSON.stringify({ ...prio, masterBrandId: null }) === JSON.stringify({ ...defaultPriorities(), masterBrandId: null });
-      if (untouched || confirm('This backup includes your brand priorities. OK replaces your current priorities with the backup\'s. Cancel keeps your current ones.')) {
-        prio = incomingPrio;
-        savePriorities(prio);
-        prioNote = '\n\nBrand priorities restored from the backup.';
-      } else {
-        prioNote = '\n\nKept your current brand priorities.';
-      }
-    }
-    render();
-
-    alert(
-      (done.length ? `Imported ${done.length} list${done.length === 1 ? '' : 's'}:\n${done.join('\n')}` : 'Nothing was imported.') + prioNote +
-      (skipped.length ? `\n\nKept your current copy of: ${skipped.join(', ')}` : '') +
-      (problems.length ? `\n\nCould not read:\n${problems.join('\n')}` : '')
-    );
   });
   input.click();
 }
 
+async function importSnapshotFiles(files) {
+  // Parse everything first. A bad file is reported and skipped, the rest still import.
+  // A list name appearing twice in the batch keeps the last one.
+  const incoming = new Map();
+  const problems = [];
+  let importedPrio = null;
+  for (const file of files) {
+    try {
+      const parsed = await parseSnapshotFile(file);
+      if (parsed.priorities) importedPrio = parsed.priorities;
+      parsed.forEach((list) => incoming.set(list.brand.name.toLowerCase(), list));
+    } catch (err) {
+      problems.push(`${file.name}: ${err.message}`);
+    }
+  }
+  const lists = [...incoming.values()];
+  if (!lists.length) {
+    alert('Could not import anything.\n' + problems.join('\n'));
+    return;
+  }
+
+  const findExisting = (list) => state.brands.find((b) => b.name.toLowerCase() === list.brand.name.toLowerCase());
+  const clashes = lists.filter(findExisting);
+  let replaceClashes = false;
+  if (clashes.length) {
+    replaceClashes = confirm(
+      `${clashes.length} of these lists already exist: ${clashes.map((l) => l.brand.name).join(', ')}.\n\n` +
+      'OK replaces them with the imported copies. Cancel keeps your current copies and imports only the new lists.'
+    );
+  }
+
+  const done = [];
+  const skipped = [];
+  let added = 0;
+  for (const list of lists) {
+    const existing = findExisting(list);
+    if (existing && !replaceClashes) { skipped.push(list.brand.name); continue; }
+    const brandId = existing ? existing.id : (list.brand.id || newId());
+    const color = existing ? existing.color : BRAND_COLORS[(state.brands.length + added) % BRAND_COLORS.length];
+    const createdAt = (existing && (existing.createdAt || existing.uploadedAt)) || list.brand.createdAt || list.brand.uploadedAt || new Date().toISOString();
+    await db.replaceBrand({ ...list.brand, id: brandId, color, createdAt }, list.accounts.map((a) => ({ ...a, brandId })));
+    offBrandIds.delete(brandId);
+    if (!existing) added += 1;
+    done.push(`${list.brand.name} (${list.accounts.length} accounts, ${list.accounts.filter((a) => a.lat !== null && a.lon !== null).length} mapped)`);
+  }
+  saveOffLists();
+  await loadAll();
+
+  // Brand priorities in a backup: applied silently over untouched defaults,
+  // otherwise only after a confirm, so a restore never wipes edits unasked.
+  let prioNote = '';
+  if (importedPrio) {
+    const incomingPrio = cleanPriorities(importedPrio);
+    const wanted = String(importedPrio.masterBrandName || '').toLowerCase();
+    const master = wanted ? state.brands.find((b) => b.name.toLowerCase() === wanted) : null;
+    incomingPrio.masterBrandId = master ? master.id : null;
+    const untouched = JSON.stringify({ ...prio, masterBrandId: null }) === JSON.stringify({ ...defaultPriorities(), masterBrandId: null });
+    if (untouched || confirm('This backup includes your brand priorities. OK replaces your current priorities with the backup\'s. Cancel keeps your current ones.')) {
+      prio = incomingPrio;
+      savePriorities(prio);
+      prioNote = '\n\nBrand priorities restored from the backup.';
+    } else {
+      prioNote = '\n\nKept your current brand priorities.';
+    }
+  }
+  render();
+
+  alert(
+    (done.length ? `Imported ${done.length} list${done.length === 1 ? '' : 's'}:\n${done.join('\n')}` : 'Nothing was imported.') + prioNote +
+    (skipped.length ? `\n\nKept your current copy of: ${skipped.join(', ')}` : '') +
+    (problems.length ? `\n\nCould not read:\n${problems.join('\n')}` : '')
+  );
+}
+
 // ---------------------------------------------------------------
-// Geocoding -- one button, calls the Cloudflare Worker relay (see
-// tools/cloudflare-worker.js). Works from any browser, any computer,
-// no local server or install needed. Falls back to a manual export/
-// run-script/import flow only if the relay itself is unreachable
-// (e.g. no internet, or the relay was deleted/renamed).
+// Geocoding: the 📍 button sends a list's unmapped addresses to the relay
+// (GEOCODE_RELAY_URL), which asks the Census Bureau's batch geocoder. If the
+// relay cannot be reached, the old manual export / run script / import path
+// is offered instead.
 // ---------------------------------------------------------------
 
 async function geocodeBrandNow(brandId, btn) {
@@ -1083,9 +1084,15 @@ async function geocodeBrandNow(brandId, btn) {
       body: JSON.stringify({
         addresses: pending.map((a) => ({ id: a.id, address: a.address, city: a.city, state: a.state || 'MI', zip: a.zip })),
       }),
+      signal: AbortSignal.timeout(180000),
     });
-    if (!res.ok) throw new Error(`relay returned ${res.status}`);
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).error || ''; } catch { /* not JSON */ }
+      throw new Error(detail || `relay returned ${res.status}`);
+    }
     const { results } = await res.json();
+    if (!results || typeof results !== 'object') throw new Error('the relay sent back something unexpected');
 
     const updated = accts.map((a) => {
       const c = results[a.id];
@@ -1125,25 +1132,16 @@ function openImportCoordsDialog(brandId) {
   input.addEventListener('change', async () => {
     const file = input.files[0];
     if (!file) return;
-    const result = await importCoordinates(brandId, file, { getAllAccounts: db.getAllAccounts, putAccounts: db.putAccounts });
-    alert(`Matched coordinates for ${result.matched} of ${result.total} accounts.`);
-    await loadAll();
-    render();
+    try {
+      const result = await importCoordinates(brandId, file, { getAllAccounts: db.getAllAccounts, putAccounts: db.putAccounts });
+      alert(`Matched coordinates for ${result.matched} of ${result.total} accounts.`);
+      await loadAll();
+      render();
+    } catch (err) {
+      alert(`Could not import coordinates: ${err.message}`);
+    }
   });
   input.click();
-}
-
-// ---------------------------------------------------------------
-// Cross-brand matching
-// ---------------------------------------------------------------
-
-async function recomputeMatches() {
-  const { groups, needsReview } = buildMatches(state.accounts);
-  for (const g of groups) await db.putMatchGroup(g);
-  state.matchGroups = await db.getAllMatchGroups();
-  window.__pendingReview = needsReview;
-  document.getElementById('review-badge').hidden = needsReview.length === 0;
-  document.getElementById('review-badge').textContent = needsReview.length;
 }
 
 // ---------------------------------------------------------------
@@ -1165,18 +1163,18 @@ function renderUnmappedBadge() {
 function openUnmappedModal() {
   const list = document.getElementById('unmapped-list');
   const accts = unmappedAccounts();
+  const brands = brandsById();
   if (!accts.length) {
     list.innerHTML = '<div class="hint">Everything is mapped.</div>';
   } else {
     list.innerHTML = accts.map((a) => {
-      const brand = brandsById()[a.brandId];
-      const statusLabel = a.geocodeStatus === 'failed' ? 'Address not found' : 'Not yet geocoded';
-      const statusClass = a.geocodeStatus === 'failed' ? 'unsold' : '';
+      const brand = brands[a.brandId];
+      const failed = a.geocodeStatus === 'failed';
       return `
         <div class="review-row">
           <div><strong>${escapeHtml(a.storeName)}</strong> (${escapeHtml(brand ? brand.name : '')})</div>
-          <a class="hint" href="${mapsUrlFor(a)}" target="_blank" rel="noopener" title="Open in Maps -- worth a try even though our geocoder couldn't match it">${escapeHtml(a.address)}, ${escapeHtml(a.city)}, ${escapeHtml(a.state)} ${escapeHtml(a.zip)}</a>
-          <div class="chip ${statusClass}" style="width:fit-content">${statusLabel}</div>
+          <a class="hint" href="${escapeHtml(mapsUrlFor(a))}" target="_blank" rel="noopener" title="Open in Maps -- worth a try even though our geocoder couldn't match it">${escapeHtml(a.address)}, ${escapeHtml(a.city)}, ${escapeHtml(a.state)} ${escapeHtml(a.zip)}</a>
+          <div class="chip ${failed ? 'unsold' : ''}" style="width:fit-content">${failed ? 'Address not found' : 'Not yet geocoded'}</div>
         </div>`;
     }).join('');
   }
@@ -1208,24 +1206,19 @@ async function retryUnmappedViaOsm() {
   if (!targets.length) return;
 
   btn.disabled = true;
-  let matched = 0;
+  const found = [];
+  let stoppedWith = '';
   for (let i = 0; i < targets.length; i++) {
-    const a = targets[i];
     statusEl.textContent = `Checking ${i + 1} of ${targets.length} via OpenStreetMap (about 1/sec, please wait)...`;
     const t0 = performance.now();
     try {
-      const coords = await geocodeOneViaNominatim(a);
-      if (coords) {
-        await db.putAccounts([{ ...a, lat: coords.lat, lon: coords.lon, geocodeStatus: 'ok' }]);
-        matched++;
+      const coords = await geocodeOneViaNominatim(targets[i]);
+      if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
+        found.push({ ...targets[i], lat: coords.lat, lon: coords.lon, geocodeStatus: 'ok' });
       }
     } catch (err) {
-      statusEl.textContent = `Stopped early: ${err.message}. ${matched} of ${i} checked were matched so far.`;
-      await loadAll();
-      render();
-      openUnmappedModal();
-      btn.disabled = false;
-      return;
+      stoppedWith = err.message;
+      break;
     }
     // Policy-required throttle -- skip the wait after the very last request.
     const elapsed = performance.now() - t0;
@@ -1234,73 +1227,144 @@ async function retryUnmappedViaOsm() {
     }
   }
 
-  await loadAll();
-  render();
+  // Saved in one write, and also when the run stopped early, so no match is lost.
+  if (found.length) {
+    try {
+      await db.putAccounts(found);
+      await loadAll();
+      render();
+    } catch (err) {
+      stoppedWith = stoppedWith || `could not save: ${err.message}`;
+    }
+  }
   openUnmappedModal();
-  statusEl.textContent = `Matched ${matched} of ${targets.length} via OpenStreetMap.`;
+  statusEl.textContent = stoppedWith
+    ? `Stopped early: ${stoppedWith}. ${found.length} matched before that.`
+    : `Matched ${found.length} of ${targets.length} via OpenStreetMap.`;
   btn.disabled = false;
 }
 
-function openReviewModal() {
-  const list = document.getElementById('review-list');
-  const pending = window.__pendingReview || [];
-  if (!pending.length) { list.innerHTML = '<div class="hint">No ambiguous matches right now.</div>'; }
-  list.innerHTML = pending.map((r, i) => `
-    <div class="review-row" data-idx="${i}">
-      <div><strong>${escapeHtml(r.a.storeName)}</strong> (${escapeHtml(brandsById()[r.a.brandId]?.name || '')})<br>${escapeHtml(r.a.address)}</div>
-      <div>vs.</div>
-      <div><strong>${escapeHtml(r.b.storeName)}</strong> (${escapeHtml(brandsById()[r.b.brandId]?.name || '')})<br>${escapeHtml(r.b.address)}</div>
-      <div class="conf">${r.confidence}% confidence match</div>
-      <div class="review-actions">
-        <button class="confirm" data-i="${i}" data-verdict="confirm">Same store</button>
-        <button class="reject" data-i="${i}" data-verdict="reject">Different stores</button>
-      </div>
-    </div>`).join('');
-  list.querySelectorAll('button[data-verdict]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const i = Number(btn.dataset.i);
-      const r = pending[i];
-      const overrides = JSON.parse(localStorage.getItem('aa-match-overrides') || '{}');
-      overrides[`${r.a.id}::${r.b.id}`] = btn.dataset.verdict;
-      localStorage.setItem('aa-match-overrides', JSON.stringify(overrides));
-      pending.splice(i, 1);
-      await recomputeMatches();
-      openReviewModal();
+// ---------------------------------------------------------------
+// Search: type a store name, city or address, tap a result to jump to it
+// ---------------------------------------------------------------
+
+function wireSearch() {
+  const input = document.getElementById('search-input');
+  const box = document.getElementById('search-results');
+  let results = [];
+  let timer = null;
+
+  const hide = () => { clearTimeout(timer); box.hidden = true; box.innerHTML = ''; results = []; };
+
+  function run() {
+    const q = input.value.trim().toLowerCase();
+    if (q.length < 2) { hide(); return; }
+    const brands = brandsById();
+    results = state.accounts
+      .filter((a) => state.activeBrandIds.has(a.brandId)
+        && [a.storeName, a.city, a.address, a.storeNumber].some((f) => String(f || '').toLowerCase().includes(q)))
+      .sort((x, y) => (y.lat !== null) - (x.lat !== null) || x.storeName.localeCompare(y.storeName))
+      .slice(0, 8);
+    if (!results.length) {
+      box.innerHTML = '<div class="search-empty">No matching accounts in the lists that are on.</div>';
+    } else {
+      box.innerHTML = results.map((a) => {
+        const mapped = a.lat !== null && a.lon !== null;
+        const brand = brands[a.brandId];
+        return `<button type="button" class="search-row" data-id="${escapeHtml(String(a.id))}"${mapped ? '' : ' disabled'}>
+          <span class="search-name">${escapeHtml(a.storeName)}</span>
+          <span class="search-sub">${escapeHtml(a.city)}${brand ? ' &middot; ' + escapeHtml(brand.name) : ''}${mapped ? '' : ' &middot; not on map'}</span></button>`;
+      }).join('');
+    }
+    box.hidden = false;
+  }
+
+  function pick(id) {
+    const acct = results.find((a) => String(a.id) === id);
+    if (!acct || acct.lat === null) return;
+    hide();
+    input.blur();
+    closeSidebar();
+    if (state.filterCounty && normalizeCountyName(acct.county) !== state.filterCounty) {
+      state.filterCounty = '';
       render();
-    });
+    }
+    focusAccount(acct.id);
+  }
+
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 120); });
+  input.addEventListener('focus', () => { if (input.value.trim().length >= 2 && !results.length) run(); });
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      const first = results.find((a) => a.lat !== null);
+      if (first) pick(String(first.id));
+    } else if (ev.key === 'Escape' && (!box.hidden || input.value)) {
+      ev.stopPropagation();
+      input.value = '';
+      hide();
+    }
   });
-  document.getElementById('review-modal').hidden = false;
+  box.addEventListener('click', (ev) => {
+    const row = ev.target.closest('.search-row');
+    if (row && !row.disabled) pick(row.dataset.id);
+  });
+  document.addEventListener('click', (ev) => { if (!ev.target.closest('.search')) hide(); });
 }
+
+// ---------------------------------------------------------------
+// Errors the person should see instead of a silently dead page
+// ---------------------------------------------------------------
+
+let errorTimer = null;
+
+function showAppError(message, { sticky = false } = {}) {
+  const el = document.getElementById('app-error');
+  if (!el) { alert(message); return; }
+  el.querySelector('.app-error-text').textContent = message;
+  el.hidden = false;
+  clearTimeout(errorTimer);
+  if (!sticky) errorTimer = setTimeout(() => { el.hidden = true; }, 15000);
+}
+
+window.addEventListener('unhandledrejection', (ev) => {
+  showAppError(`Something went wrong: ${(ev.reason && ev.reason.message) || ev.reason}`);
+});
+window.addEventListener('error', (ev) => {
+  if (!ev.message || ev.message === 'Script error.' || /ResizeObserver/.test(ev.message)) return;
+  showAppError(`Something went wrong: ${ev.message}`);
+});
 
 // ---------------------------------------------------------------
 // Wire up
 // ---------------------------------------------------------------
 
-async function main() {
-  // Clicking a county on the map navigates there ONLY -- it must never
-  // silently filter the data too. That combination is exactly what made
-  // pins vanish on zoom-out before: a stray click set an invisible county
-  // filter, and zooming back out kept showing just that one county instead
-  // of everything, with no on-screen sign the filter was even active.
-  await initMap('leaflet-map', {
-    onCountyClickFn: (name) => { flyToCounty(name, { onlyZoomIn: true }); },
-    onRouteToggleFn: toggleRouteStop,
-    routePositionFn: routePositionOf,
-    onPlaceToggleFn: toggleRoutePlace,
-    placePositionFn: routePositionOfPlace,
-  });
-  await loadAll();
-  // A launch with every list remembered as off would open to a blank map.
-  if (state.brands.length && state.activeBrandIds.size === 0) {
-    offBrandIds.clear();
-    saveOffLists();
-    syncActiveBrands();
-  }
-  await recomputeMatches();
-  render();
-  renderRouteBar();
-  renderRouteStops(routeStops);
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  backdrop.classList.remove('open');
+  backdrop.hidden = true;
+}
 
+const MODAL_CLOSERS = {
+  'upload-modal': closeUploadModal,
+  'prio-modal': closePrioPanel,
+  'brief-modal': closeBrief,
+  'unmapped-modal': () => { document.getElementById('unmapped-modal').hidden = true; },
+};
+
+// Escape closes the top-most thing that is open.
+function onEscape(ev) {
+  if (ev.key !== 'Escape') return;
+  const modal = [...document.querySelectorAll('.modal-backdrop')].find((m) => !m.hidden);
+  if (modal) { (MODAL_CLOSERS[modal.id] || (() => { modal.hidden = true; }))(); return; }
+  if (!document.getElementById('sku-panel').hidden) { closeSkuPanel(); return; }
+  if (!document.getElementById('near-panel').hidden) { document.getElementById('near-panel').hidden = true; return; }
+  if (isDetailOpen()) { closeDetailPanel(); return; }
+  closeSidebar();
+}
+
+function wireUi() {
+  document.getElementById('brand-list').addEventListener('click', brandListClick);
   document.getElementById('near-me-btn').addEventListener('click', showNearMe);
   document.getElementById('near-close').addEventListener('click', () => { document.getElementById('near-panel').hidden = true; });
   document.getElementById('route-optimize').addEventListener('click', optimizeRoute);
@@ -1315,17 +1379,9 @@ async function main() {
     commitRoute();
   });
 
-  // Andrew, 2026-08-21: mobile-only off-canvas sidebar (see app.css's
-  // max-width:820px block) -- toggle button opens/closes it, tapping the
-  // backdrop closes it. No-op on desktop since the button is display:none
-  // there, but the listeners are harmless either way.
+  // Mobile: the sidebar is an off-canvas drawer (see app.css, max-width 820px).
   const sidebarEl = document.getElementById('sidebar');
   const backdropEl = document.getElementById('sidebar-backdrop');
-  function closeSidebar() {
-    sidebarEl.classList.remove('open');
-    backdropEl.classList.remove('open');
-    backdropEl.hidden = true;
-  }
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
     const opening = !sidebarEl.classList.contains('open');
     sidebarEl.classList.toggle('open', opening);
@@ -1349,11 +1405,6 @@ async function main() {
   document.getElementById('upload-cancel').addEventListener('click', closeUploadModal);
   document.getElementById('upload-submit').addEventListener('click', handleUpload);
 
-  document.querySelectorAll('#compare-segmented button').forEach((b) => {
-    b.addEventListener('click', () => { state.compareMode = b.dataset.mode; render(); });
-  });
-  document.getElementById('gap-has').addEventListener('change', (e) => { state.gapHas = e.target.value; render(); });
-  document.getElementById('gap-missing').addEventListener('change', (e) => { state.gapMissing = e.target.value; render(); });
   document.getElementById('filter-county').addEventListener('change', (e) => {
     state.filterCounty = e.target.value;
     render();
@@ -1361,44 +1412,79 @@ async function main() {
   });
   document.getElementById('clear-county-filter').addEventListener('click', () => {
     state.filterCounty = '';
-    document.getElementById('filter-county').value = '';
     render();
   });
 
-  document.getElementById('review-badge').addEventListener('click', openReviewModal);
-  document.getElementById('review-close').addEventListener('click', () => { document.getElementById('review-modal').hidden = true; });
-
   document.getElementById('unmapped-badge').addEventListener('click', openUnmappedModal);
-  document.getElementById('unmapped-close').addEventListener('click', () => { document.getElementById('unmapped-modal').hidden = true; });
+  document.getElementById('unmapped-close').addEventListener('click', MODAL_CLOSERS['unmapped-modal']);
   document.getElementById('unmapped-export').addEventListener('click', () => {
     exportFilteredAccounts(unmappedAccounts(), brandsById(), 'account-atlas-unmapped.csv');
   });
   document.getElementById('unmapped-retry-osm').addEventListener('click', retryUnmappedViaOsm);
 
   document.getElementById('clear-all-btn').addEventListener('click', async () => {
-    const total = state.accounts.length;
     const ok = confirm(
-      `Delete everything stored in this browser -- ${state.brands.length} brand(s), ${total} account(s), all coordinates?\n\n` +
-      `This cannot be undone. Click OK to delete, or Cancel to stop.`
+      `Delete everything stored in this browser -- ${state.brands.length} list(s), ${state.accounts.length} account(s), all coordinates, and the current route?\n\n` +
+      `Your brand priorities stay. This cannot be undone. Click OK to delete, or Cancel to stop.`
     );
     if (!ok) return;
-    await db.clearAllData();
-    localStorage.removeItem('aa-match-overrides');
+    try {
+      await db.clearAllData();
+    } catch (err) {
+      alert(`Could not clear the data: ${err.message}`);
+      return;
+    }
+    DATA_STORAGE_KEYS.forEach((key) => { try { localStorage.removeItem(key); } catch { /* storage blocked */ } });
     location.reload();
   });
 
   document.getElementById('export-view-btn').addEventListener('click', () => {
     exportFilteredAccounts(visibleAccounts(), brandsById());
   });
+  document.getElementById('app-error-close').addEventListener('click', () => { document.getElementById('app-error').hidden = true; });
 
-  document.getElementById('search-input').addEventListener('input', (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    if (!q) { render(); return; }
-    const match = state.accounts.find((a) => a.storeName.toLowerCase().includes(q));
-    if (match && match.lat !== null) {
-      getMap().flyTo([match.lat, match.lon], 14);
-    }
+  wireSearch();
+  document.addEventListener('keydown', onEscape);
+}
+
+async function start() {
+  // Clicking a county on the map navigates there ONLY -- it must never
+  // silently filter the data too. That combination is exactly what made
+  // pins vanish on zoom-out before: a stray click set an invisible county
+  // filter, and zooming back out kept showing just that one county instead
+  // of everything, with no on-screen sign the filter was even active.
+  await initMap('leaflet-map', {
+    onCountyClickFn: (name) => { flyToCounty(name, { onlyZoomIn: true }); },
+    onRouteToggleFn: toggleRouteStop,
+    routePositionFn: routePositionOf,
+    onPlaceToggleFn: toggleRoutePlace,
+    placePositionFn: routePositionOfPlace,
   });
+  await loadAll();
+  // A launch with every list remembered as off would open to a blank map.
+  if (state.brands.length && state.activeBrandIds.size === 0) {
+    offBrandIds.clear();
+    saveOffLists();
+    syncActiveBrands();
+  }
+  render();
+  renderRouteBar();
+  renderRouteStops(routeStops);
+  wireUi();
+
+  // Once there is data worth protecting, ask the browser not to evict it.
+  if (state.brands.length && navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
+}
+
+async function main() {
+  try {
+    await start();
+  } catch (err) {
+    console.error(err);
+    showAppError(`Account Atlas could not start: ${err.message}`, { sticky: true });
+  }
 }
 
 main();

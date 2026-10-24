@@ -126,7 +126,8 @@ export function loadRoute() {
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((s) => s && s.id && Number.isFinite(s.lat) && Number.isFinite(s.lon) && s.query)
+      .filter((s) => s && s.id && Number.isFinite(s.lat) && Number.isFinite(s.lon))
+      .map((s) => (typeof s.query === 'string' ? s : { ...s, query: '' }))
       .slice(0, MAX_STOPS);
   } catch {
     return [];

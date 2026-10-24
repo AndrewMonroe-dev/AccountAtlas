@@ -10,20 +10,19 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1a33">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+<link rel="stylesheet" href="vendor/markercluster/MarkerCluster.css" />
+<link rel="stylesheet" href="vendor/markercluster/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261024a">
-<link rel="stylesheet" href="assets/css/app.css?v=20261024a">
-<link rel="stylesheet" href="assets/css/map.css?v=20261024a">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261024b">
+<link rel="stylesheet" href="assets/css/app.css?v=20261024b">
+<link rel="stylesheet" href="assets/css/map.css?v=20261024b">
 </head>
 <body>
+<div class="app-error" id="app-error" role="alert" hidden><span class="app-error-text"></span><button id="app-error-close" aria-label="Dismiss">&times;</button></div>
 <div class="app">
   <header class="topbar">
-    <!-- Andrew, 2026-08-21: mobile-only, see app.css's max-width:820px block
-         -- the sidebar becomes an off-canvas drawer on a phone-width
-         screen, this is what opens/closes it. -->
+    <!-- Phone width: the sidebar is an off-canvas drawer, this opens and closes it. -->
     <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Toggle menu">&#9776;</button>
     <div class="wordmark">
       <span class="name serif">Account Atlas</span>
@@ -32,12 +31,12 @@
     <div class="spacer"></div>
     <div class="search">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input id="search-input" type="text" placeholder="Search store name…">
+      <input id="search-input" type="search" placeholder="Search store, city or address" autocomplete="off" aria-label="Search accounts">
+      <div class="search-results" id="search-results" hidden></div>
     </div>
   </header>
 
   <div class="main">
-    <!-- Andrew, 2026-08-21: mobile-only tap-to-close backdrop, see app.css -->
     <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
     <aside class="sidebar" id="sidebar">
 
@@ -47,31 +46,7 @@
         <button class="ghost-btn" id="add-brand-btn">+ Upload brand spreadsheet</button>
         <button class="ghost-btn" id="import-snapshot-btn">+ Import snapshots or a backup (pick several at once)</button>
         <button class="ghost-btn" id="backup-all-btn">Back up all lists to one file</button>
-        <div class="hint">Snapshot (&#128190;) = one brand's full data as a single file, for moving between your own computers -- import it back into Account Atlas anywhere with just a browser. Back up all lists = every list in one file, import it the same way to restore them all. Map viewer (&#128506;) = a standalone HTML file with the map baked in, for sending to anyone -- no login, no Account Atlas install, just double-click to open. Save either one and reopen it again later like any other file.</div>
-      </div>
-
-      <div class="section">
-        <div class="section-label">Compare mode</div>
-        <div class="segmented" id="compare-segmented">
-          <button data-mode="overlay" class="active">Overlay</button>
-        </div>
-        <!-- Andrew, 2026-08-21: Gap view (cross-brand address matching, see
-             visibleAccounts()'s 'gap' branch in app.js) removed from the UI
-             -- it compares two separate brand files by matched address,
-             which falls apart the moment one brand's list is small/new
-             (the exact "not sold anywhere yet" case this was built for).
-             Every account's pin ALREADY renders solid (sold) vs hollow
-             (not yet) within Overlay mode based on its own skus data (see
-             renderPins in mapView.js) -- toggle on just the one brand you
-             care about; the Coverage counts below already reflect the
-             split. Legend section removed 2026-08-21 (Andrew: redundant
-             with Coverage). Code kept in app.js, unused, in case a real
-             two-brand comparison is wanted later. -->
-        <div class="hint">Toggle on one brand at a time to see its own sold vs. not-yet-sold split -- solid pins are sold, hollow pins aren't.</div>
-        <div class="gap-form" id="gap-form" style="display:none">
-          <div class="row"><span style="color:var(--ink-dim)">Has</span><select id="gap-has"></select></div>
-          <div class="row"><span class="arrow">&rarr; missing</span><select id="gap-missing"></select></div>
-        </div>
+        <div class="hint">&#128190; saves one list with its coordinates, to move between your own computers. &#128506; saves a standalone map page you can send to anyone. Back up all lists saves everything in one file, and the import button restores it.</div>
       </div>
 
       <div class="section">
@@ -90,13 +65,13 @@
           <div class="penetration-bar"><div id="stat-bar" style="width:0%"></div></div>
           <div class="lbl" id="stat-pct" style="grid-column:1/-1">0% penetration</div>
         </div>
+        <div class="hint">Solid pins are sold, hollow pins are not yet sold. Tap a list on or off above the map.</div>
       </div>
 
 
       <div class="section">
         <div class="section-label">Export</div>
         <button class="ghost-btn" id="export-view-btn">Export current view to CSV</button>
-        <button class="link-btn" id="review-badge" hidden style="margin-top:6px">0 matches need review &rarr;</button>
         <button class="link-btn" id="unmapped-badge" hidden style="margin-top:6px">0 accounts not on map &rarr;</button>
       </div>
 
@@ -173,18 +148,6 @@
   </div>
 </div>
 
-<!-- Match review modal -->
-<div class="modal-backdrop" id="review-modal" hidden>
-  <div class="modal">
-    <h2>Review uncertain matches</h2>
-    <div class="hint">These accounts look similar across brands but weren't confident enough to auto-link. Confirm or reject each one.</div>
-    <div id="review-list" style="display:flex; flex-direction:column; gap:10px;"></div>
-    <div class="modal-actions">
-      <button class="ghost-btn" id="review-close">Close</button>
-    </div>
-  </div>
-</div>
-
 <!-- Unmapped accounts modal -->
 <div class="modal-backdrop" id="unmapped-modal" hidden>
   <div class="modal">
@@ -216,9 +179,8 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module" src="src/app.js?v=20261024a"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/markercluster/leaflet.markercluster.js"></script>
+<script type="module" src="src/app.js?v=20261024b"></script>
 </body>
 </html>

@@ -5,6 +5,8 @@
 // with no installs allowed) -- geocode once wherever Node is available,
 // then import the finished result anywhere with just a browser.
 
+import { escapeHtml, downloadBlob, safeFileName } from '../core/util.js?v=20261024b';
+
 export function exportBrandSnapshot(brand, accounts) {
   const snapshot = {
     formatVersion: 1,
@@ -12,13 +14,7 @@ export function exportBrandSnapshot(brand, accounts) {
     brand,
     accounts,
   };
-  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${brand.name.replace(/\s+/g, '-')}-snapshot.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([JSON.stringify(snapshot)], { type: 'application/json' }), `${safeFileName(brand.name)}-snapshot.json`);
 }
 
 // Standalone viewer: one self-contained .html file with a brand's map +
@@ -46,11 +42,11 @@ export function exportBrandSnapshot(brand, accounts) {
 // left needing a live network request is the OpenStreetMap tile images,
 // which is a plain image load, not script execution, and far less likely
 // to be blocked by a constrained preview context.
-const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-const LEAFLET_JS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-const CLUSTER_CSS_URL = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';
-const CLUSTER_DEFAULT_CSS_URL = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css';
-const CLUSTER_JS_URL = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';
+const LEAFLET_CSS_URL = 'vendor/leaflet/leaflet.css';
+const LEAFLET_JS_URL = 'vendor/leaflet/leaflet.js';
+const CLUSTER_CSS_URL = 'vendor/markercluster/MarkerCluster.css';
+const CLUSTER_DEFAULT_CSS_URL = 'vendor/markercluster/MarkerCluster.Default.css';
+const CLUSTER_JS_URL = 'vendor/markercluster/leaflet.markercluster.js';
 
 async function fetchText(url) {
   const res = await fetch(url);
@@ -60,6 +56,7 @@ async function fetchText(url) {
 
 export async function exportStandaloneViewer(brand, accounts) {
   const geoRes = await fetch('data/geo/michigan-counties.geojson');
+  if (!geoRes.ok) throw new Error(`The county map file did not load (HTTP ${geoRes.status}).`);
   const countyGeoJson = await geoRes.json();
 
   const [leafletCss, leafletJs, clusterCss, clusterDefaultCss, clusterJs] = await Promise.all([
@@ -85,19 +82,7 @@ export async function exportStandaloneViewer(brand, accounts) {
   };
 
   const html = buildViewerHtml(brand.name, payload, { leafletCss, leafletJs, clusterCss, clusterDefaultCss, clusterJs });
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${brand.name.replace(/\s+/g, '-')}-map-viewer.html`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
+  downloadBlob(new Blob([html], { type: 'text/html' }), `${safeFileName(brand.name)}-map-viewer.html`);
 }
 
 function buildViewerHtml(brandName, payload, libs) {
@@ -305,6 +290,45 @@ countyLayer.on('click', function (e) {
 </html>`;
 }
 
+// A coordinate from a file: a finite number or null, never a string.
+function cleanCoord(v) {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
+}
+
+// Keeps only usable account records from an imported file and repairs their
+// shape, so one bad row can never break the map later.
+export function cleanAccounts(list) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((a) => {
+    if (!a || typeof a !== 'object' || !a.id || !a.skus || typeof a.skus !== 'object') return;
+    const lat = cleanCoord(a.lat);
+    const lon = cleanCoord(a.lon);
+    const mapped = lat !== null && lon !== null;
+    out.push({
+      ...a,
+      id: String(a.id),
+      storeName: String(a.storeName ?? ''),
+      address: String(a.address ?? ''),
+      city: String(a.city ?? ''),
+      county: String(a.county ?? ''),
+      state: String(a.state ?? ''),
+      zip: String(a.zip ?? ''),
+      lat: mapped ? lat : null,
+      lon: mapped ? lon : null,
+      geocodeStatus: mapped ? (a.geocodeStatus || 'ok') : (a.geocodeStatus === 'failed' ? 'failed' : 'pending'),
+    });
+  });
+  return out;
+}
+
+function cleanList(l) {
+  if (!l || !l.brand || !l.brand.name) return null;
+  const accounts = cleanAccounts(l.accounts);
+  if (!accounts.length && Array.isArray(l.accounts) && l.accounts.length) return null;
+  return { brand: l.brand, accounts };
+}
+
 // Returns an array of { brand, accounts }: one entry for a single-list
 // snapshot, several for an all-lists backup. Throws if the file isn't a
 // recognizable Account Atlas file.
@@ -316,18 +340,19 @@ export async function parseSnapshotFile(file) {
   } catch {
     throw new Error('Not a valid JSON file.');
   }
+  if (!data || typeof data !== 'object') throw new Error('This file doesn\'t look like an Account Atlas snapshot or backup.');
   if (Array.isArray(data.lists)) {
-    const lists = data.lists.filter((l) => l && l.brand && l.brand.name && Array.isArray(l.accounts));
-    if (!lists.length) throw new Error('This backup file has no lists in it.');
-    const out = lists.map((l) => ({ brand: l.brand, accounts: l.accounts }));
+    const out = data.lists.map(cleanList).filter(Boolean);
+    if (!out.length) throw new Error('This backup file has no lists in it.');
     // Brand priorities ride along in an all-lists backup (2026-10-23).
     if (data.priorities && typeof data.priorities === 'object') out.priorities = data.priorities;
     return out;
   }
-  if (!data.brand || !Array.isArray(data.accounts)) {
+  const single = cleanList(data);
+  if (!single || !Array.isArray(data.accounts)) {
     throw new Error('This file doesn\'t look like an Account Atlas snapshot or backup.');
   }
-  return [{ brand: data.brand, accounts: data.accounts }];
+  return [single];
 }
 
 // One file holding every list (brands plus all their accounts with resolved
@@ -343,11 +368,5 @@ export function exportAllLists(brands, accounts, priorities = null) {
       accounts: accounts.filter((a) => a.brandId === brand.id),
     })),
   };
-  const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `account-atlas-all-lists-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([JSON.stringify(backup)], { type: 'application/json' }), `account-atlas-all-lists-${new Date().toISOString().slice(0, 10)}.json`);
 }

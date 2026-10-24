@@ -2,7 +2,8 @@
 // Both live on the same map instance; Leaflet's own zoom handles the
 // transition, no separate "view mode" toggle needed once real tiles are in.
 
-import { formatAmount } from './heatmap.js?v=20261024a';
+import { formatAmount } from './heatmap.js?v=20261024b';
+import { escapeHtml, normalizeCountyName } from '../core/util.js?v=20261024b';
 
 let map = null;
 let countyLayer = null;
@@ -31,21 +32,6 @@ let onPlaceToggle = null;   // (place, wantOn) => boolean, false = refused
 let placePosition = null;   // (place) => 1-based stop number, 0 if none
 let openPlace = null;       // gray business whose popup is open, { place, marker }
 
-// County names typed into a real Excel by a real person rarely match the
-// map's canonical Census spelling exactly -- "St. Clair" vs "Saint Clair"
-// vs "st clair county" vs trailing whitespace. Every place county names
-// from account data get matched against the map's own names goes through
-// this instead of a raw ===.
-function normalizeCountyName(name) {
-  return String(name || '')
-    .toLowerCase()
-    .replace(/\bcounty\b/g, '')
-    .replace(/[.,]/g, '')
-    .replace(/\bst\b/g, 'saint')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 export async function initMap(containerId, {
   onCountyClickFn, onRouteToggleFn, routePositionFn, onPlaceToggleFn, placePositionFn,
 } = {}) {
@@ -60,6 +46,9 @@ export async function initMap(containerId, {
   const detailClose = document.getElementById('detail-close');
   if (detailClose) detailClose.addEventListener('click', hideDetailPanel);
 
+  if (typeof L === 'undefined' || !L.markerClusterGroup) {
+    throw new Error('The map library did not load. Check your connection and reload.');
+  }
   map = L.map(containerId, { zoomControl: false }).setView(MI_CENTER, MI_ZOOM);
 
   L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -82,6 +71,7 @@ export async function initMap(containerId, {
   }).addTo(map);
 
   const res = await fetch('data/geo/michigan-counties.geojson');
+  if (!res.ok) throw new Error(`The county map file did not load (HTTP ${res.status}).`);
   countyGeoJson = await res.json();
 
   clusterGroup = L.markerClusterGroup({
@@ -93,107 +83,119 @@ export async function initMap(containerId, {
   return map;
 }
 
-function countyColor(pct) {
-  // pct: 0-1 penetration for the active comparison, null = no data
-  if (pct === null || Number.isNaN(pct)) return 'var(--county-empty)';
-  if (pct >= 0.75) return 'var(--sold)';
-  if (pct >= 0.5) return 'var(--county-mid-high)';
-  if (pct >= 0.25) return 'var(--county-mid-low)';
-  return 'var(--unsold)';
-}
-
-// countyStats: Map<countyName, {sold, total}> -- countyName as typed in
-// the source Excel, not necessarily matching the map's own spelling.
+// countyStats: Map<countyName, {sold, total}> -- keyed by any spelling, matched
+// to the map through normalizeCountyName.
 // heat (optional, volume heatmap): { values: Map<countyName, {volume, accounts,
 // value}>, colorFor(value) } -- when given, counties are shaded by value
 // instead of by sold percentage.
 // shadeOn false: no shading at all (the "Heat: off" toggle), counties are
 // see-through outlines that still show tooltips and take clicks.
+//
+// The county shapes are built once. Every later call only restyles them and
+// swaps their tooltip text, which is far cheaper than rebuilding 83 polygons.
 export function renderChoropleth(countyStats, heat = null, shadeOn = true) {
-  if (countyLayer) { map.removeLayer(countyLayer); }
+  const stats = new Map();
+  countyStats.forEach((v, k) => stats.set(normalizeCountyName(k), v));
+  const heatBy = new Map();
+  if (heat) heat.values.forEach((v, k) => heatBy.set(normalizeCountyName(k), v));
+  const palette = shadeOn && !heat ? readSoldPalette() : null;
 
-  const normalizedStats = new Map();
-  countyStats.forEach((v, k) => normalizedStats.set(normalizeCountyName(k), v));
-  const normalizedHeat = new Map();
-  if (heat) heat.values.forEach((v, k) => normalizedHeat.set(normalizeCountyName(k), v));
+  const styleFor = (feature) => {
+    const key = normalizeCountyName(feature.properties.name);
+    if (!shadeOn) return { color: 'var(--line)', weight: 1, fillColor: 'transparent', fillOpacity: 0.05 };
+    if (heat) {
+      const h = heatBy.get(key);
+      return { color: 'var(--line)', weight: 1, fillColor: h ? heat.colorFor(h.value) : 'transparent', fillOpacity: h ? 0.85 : 0.05 };
+    }
+    const st = stats.get(key);
+    const pct = st && st.total ? st.sold / st.total : null;
+    return { color: 'var(--line)', weight: 1, fillColor: pct === null ? 'transparent' : palette(pct), fillOpacity: pct === null ? 0.05 : 0.55 };
+  };
 
-  countyLayer = L.geoJSON(countyGeoJson, {
-    style: (feature) => {
-      if (!shadeOn) {
-        return { color: 'var(--line)', weight: 1, fillColor: 'transparent', fillOpacity: 0.05 };
-      }
-      if (heat) {
-        const h = normalizedHeat.get(normalizeCountyName(feature.properties.name));
-        return {
-          color: 'var(--line)',
-          weight: 1,
-          fillColor: h ? heat.colorFor(h.value) : 'transparent',
-          fillOpacity: h ? 0.85 : 0.05,
-        };
-      }
-      const stats = normalizedStats.get(normalizeCountyName(feature.properties.name));
-      const pct = stats && stats.total ? stats.sold / stats.total : null;
-      return {
-        color: 'var(--line)',
-        weight: 1,
-        fillColor: pct === null ? 'transparent' : realColor(pct),
-        fillOpacity: pct === null ? 0.05 : 0.55,
-      };
-    },
-    onEachFeature: (feature, layer) => {
-      const name = feature.properties.name;
-      const stats = normalizedStats.get(normalizeCountyName(name));
-      const h = heat ? normalizedHeat.get(normalizeCountyName(name)) : null;
-      const label = h
-        ? `<strong>${name} County</strong><br>${formatAmount(h.volume)} total &middot; ${h.accounts} account${h.accounts === 1 ? '' : 's'}<br>${formatAmount(h.accounts ? h.volume / h.accounts : 0)} per account`
-        : (stats
-          ? `<strong>${name} County</strong><br>${stats.sold} of ${stats.total} accounts sold`
-          : `<strong>${name} County</strong><br>no accounts loaded`);
-      layer.bindTooltip(label, { sticky: true, className: 'county-tooltip' });
-      // Fat-finger friendly: a click that just misses a pin lands on the county
-      // underneath. If a visible pin is within reach, open it instead of
-      // treating the click as "navigate to this county".
-      // With the store panel open, a tap on empty county space only closes it
-      // (no zoom to the county in the same tap).
-      layer.on('click', (e) => {
-        L.DomEvent.stopPropagation(e);
-        const hit = nearestPin(e.containerPoint);
-        if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
-        if (detailPanel && !detailPanel.hidden) { hideDetailPanel(); return; }
-        if (onCountyClick) onCountyClick(name);
-      });
-      layer.on('mouseover', () => layer.setStyle({ weight: 2 }));
-      layer.on('mouseout', () => layer.setStyle({ weight: 1 }));
-    },
-  }).addTo(map);
+  const labelFor = (feature) => {
+    const name = escapeHtml(feature.properties.name);
+    const key = normalizeCountyName(feature.properties.name);
+    const h = heat ? heatBy.get(key) : null;
+    if (h) {
+      return `<strong>${name} County</strong><br>${formatAmount(h.volume)} total &middot; ${h.accounts} account${h.accounts === 1 ? '' : 's'}<br>${formatAmount(h.accounts ? h.volume / h.accounts : 0)} per account`;
+    }
+    const st = stats.get(key);
+    return st
+      ? `<strong>${name} County</strong><br>${st.sold} of ${st.total} accounts sold`
+      : `<strong>${name} County</strong><br>no accounts loaded`;
+  };
+
+  if (!countyLayer) {
+    countyLayer = L.geoJSON(countyGeoJson, {
+      style: styleFor,
+      onEachFeature: (feature, layer) => {
+        const name = feature.properties.name;
+        layer.bindTooltip(labelFor(feature), { sticky: true, className: 'county-tooltip' });
+        // Fat-finger friendly: a click that just misses a pin lands on the county
+        // underneath. If a visible pin is within reach, open it instead of
+        // treating the click as "navigate to this county".
+        // With the store panel open, a tap on empty county space only closes it
+        // (no zoom to the county in the same tap).
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          const hit = nearestPin(e.containerPoint);
+          if (hit) { showDetailPanel(hit.acct, hit.brand, { pin: true }); return; }
+          if (detailPanel && !detailPanel.hidden) { hideDetailPanel(); return; }
+          if (onCountyClick) onCountyClick(name);
+        });
+        layer.on('mouseover', () => layer.setStyle({ weight: 2 }));
+        layer.on('mouseout', () => layer.setStyle({ weight: 1 }));
+      },
+    }).addTo(map);
+    return;
+  }
+  countyLayer.eachLayer((layer) => {
+    layer.setStyle(styleFor(layer.feature));
+    layer.setTooltipContent(labelFor(layer.feature));
+  });
 }
 
-// Resolve CSS custom properties to real colors since Leaflet's canvas/SVG
-// renderer doesn't understand var() the way DOM CSS does.
-function realColor(pct) {
-  const style = getComputedStyle(document.documentElement);
-  const read = (name) => style.getPropertyValue(name).trim();
-  if (pct >= 0.75) return read('--sold');
-  if (pct >= 0.5) return read('--county-mid-high');
-  if (pct >= 0.25) return read('--county-mid-low');
-  return read('--unsold');
+// The map renderer does not resolve var() for fill colors, so the sold
+// percentage palette is read from the CSS tokens once per render.
+function readSoldPalette() {
+  const colors = {
+    high: getCssVar('--sold'), midHigh: getCssVar('--county-mid-high'),
+    midLow: getCssVar('--county-mid-low'), low: getCssVar('--unsold'),
+  };
+  return (pct) => {
+    if (pct >= 0.75) return colors.high;
+    if (pct >= 0.5) return colors.midHigh;
+    if (pct >= 0.25) return colors.midLow;
+    return colors.low;
+  };
 }
 
 // accounts: array of account records with lat/lon set, plus brand info for
 // pin color/shape and a rendered popup body.
 export function renderPins(accounts, brandsById) {
+  // Nothing about the dots changed (the common case: a shade, Dots or Heat
+  // switch), so keep the existing markers instead of rebuilding thousands.
+  const same = accounts.length === pinEntries.length
+    && accounts.every((a, i) => pinEntries[i].acct === a && pinEntries[i].brand === brandsById[a.brandId]);
+  if (same) return;
+
   clusterGroup.clearLayers();
   pinEntries = [];
   pinCells = new Map();
+  const c = {
+    soldStroke: getCssVar('--pin-sold-stroke'), unsoldStroke: getCssVar('--pin-unsold-stroke'),
+    sold: getCssVar('--pin-sold'), unsold: getCssVar('--pin-unsold'),
+  };
+  const markers = [];
   accounts.forEach((acct) => {
     if (acct.lat === null || acct.lon === null) return;
     const brand = brandsById[acct.brandId];
     const sold = Object.values(acct.skus).some(Boolean);
     const marker = L.circleMarker([acct.lat, acct.lon], {
       radius: sold ? 8 : 6,
-      color: sold ? getCssVar('--pin-sold-stroke') : (brand ? brand.color : getCssVar('--pin-unsold-stroke')),
+      color: sold ? c.soldStroke : (brand ? brand.color : c.unsoldStroke),
       weight: sold ? 1.5 : 2,
-      fillColor: sold ? getCssVar('--pin-sold') : getCssVar('--pin-unsold'),
+      fillColor: sold ? c.sold : c.unsold,
       fillOpacity: sold ? 0.95 : 0.85,
       className: sold ? 'pin-sold-glow' : 'pin-unsold',
     });
@@ -202,12 +204,13 @@ export function renderPins(accounts, brandsById) {
       L.DomEvent.stopPropagation(e);
       showDetailPanel(acct, brand, { pin: true });
     });
-    clusterGroup.addLayer(marker);
+    markers.push(marker);
     pinEntries.push({ marker, acct, brand });
     const cellKey = `${Math.floor(acct.lat * 1000)},${Math.floor(acct.lon * 1000)}`;
     if (!pinCells.has(cellKey)) pinCells.set(cellKey, []);
     pinCells.get(cellKey).push({ lat: acct.lat, lon: acct.lon });
   });
+  clusterGroup.addLayers(markers);
   // Accounts changed, so which businesses count as "already an account" did too.
   redrawNearby();
 }
@@ -263,6 +266,10 @@ function showDetailPanel(acct, brand, { pin = false } = {}) {
     });
   }
 }
+
+export function closeDetailPanel() { hideDetailPanel(); }
+
+export function isDetailOpen() { return !!detailPanel && !detailPanel.hidden; }
 
 function hideDetailPanel() {
   panelPinned = false;
@@ -350,7 +357,7 @@ export function mapsUrlFor(acct) {
 function detailHtml(acct, brand) {
   const soldSkus = Object.entries(acct.skus).filter(([, v]) => v).map(([k]) => k);
   const unsoldSkus = Object.entries(acct.skus).filter(([, v]) => !v).map(([k]) => k);
-  const chip = (name, cls) => `<span class="chip ${cls}">${name}</span>`;
+  const chip = (name, cls) => `<span class="chip ${cls}">${escapeHtml(name)}</span>`;
   return `
     <div class="map-popup">
       <div class="pname">${escapeHtml(acct.storeName)}</div>
@@ -361,12 +368,6 @@ function detailHtml(acct, brand) {
       <div class="fam">${escapeHtml(brand ? brand.name : '')} &mdash; unsold (${unsoldSkus.length})</div>
       <div class="chip-row">${unsoldSkus.length ? unsoldSkus.map((s) => chip(s, 'unsold')).join('') : '<span class="chip-empty">none</span>'}</div>
     </div>`;
-}
-
-function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
 }
 
 // onlyZoomIn: used by map clicks so a stray click while already zoomed in

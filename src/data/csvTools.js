@@ -1,3 +1,5 @@
+import { downloadBlob, safeFileName } from '../core/util.js?v=20261024b';
+
 // CSV export for (a) addresses to hand to tools/geocode.mjs, and
 // (b) the current filtered account view, for a real call-sheet export.
 
@@ -6,25 +8,23 @@ function csvField(v) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function downloadCsv(filename, rows) {
-  const csv = rows.map((r) => r.map(csvField).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+// bom: Excel only reads accents correctly in a CSV that starts with a byte
+// order mark. The address file for the geocoder stays plain.
+function downloadCsv(filename, rows, { bom = false } = {}) {
+  const csv = rows.map((r) => r.map(csvField).join(',')).join('\r\n');
+  downloadBlob(new Blob([bom ? '\uFEFF' + csv : csv], { type: 'text/csv;charset=utf-8' }), filename);
 }
 
 export function exportAddressesForGeocoding(brand, accounts) {
   const rows = accounts.map((a) => [a.id, a.address, a.city, a.state || 'MI', a.zip]);
-  downloadCsv(`${brand.name.replace(/\s+/g, '-')}-addresses.csv`, rows);
+  downloadCsv(`${safeFileName(brand.name)}-addresses.csv`, rows);
 }
 
 export async function importCoordinates(brandId, file, { getAllAccounts, putAccounts }) {
   const text = await file.text();
-  const coords = JSON.parse(text);
+  let coords;
+  try { coords = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
+  if (!coords || typeof coords !== 'object' || Array.isArray(coords)) throw new Error('That is not a coordinates file.');
   const accounts = (await getAllAccounts()).filter((a) => a.brandId === brandId);
   const updated = accounts.map((a) => {
     const c = coords[a.id];
@@ -55,5 +55,5 @@ export function exportFilteredAccounts(accounts, brandsById, filename = 'account
       sold.join('; '), unsold.join('; '),
     ];
   });
-  downloadCsv(filename, [header, ...rows]);
+  downloadCsv(filename, [header, ...rows], { bom: true });
 }

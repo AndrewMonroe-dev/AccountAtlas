@@ -1,117 +1,105 @@
 # Account Atlas
 
-Multi-brand sold/unsold account coverage map for Michigan. Upload any
-brand's Excel export, see every account that carries it (and every one that
-doesn't) on a real, zoomable map — statewide county view down to individual
-store pins — and compare brands against each other.
+Sold/unsold account coverage map for Michigan. Upload a spreadsheet, see every
+account that carries it and every one that does not, from a statewide county
+view down to individual store pins. Shade counties by sold percentage or by
+volume, build a route, and get a pre-visit brief for each stop.
 
-**No account, store, or SKU data ever leaves your browser or touches this
-repo.** Everything after upload lives in IndexedDB, client-side only. This
-repo is code and public Michigan county geometry, nothing else — see
-`.gitignore`.
+**No account, store or SKU data ever leaves your browser or touches this repo.**
+Everything after upload lives in IndexedDB and localStorage on your device. The
+repo holds code and public map data only, see `.gitignore`.
 
-## Using it
+## Running it
 
-**Start the local helper first, once per session:**
+Windows: double-click the Account Atlas shortcut (it runs `tools/server.mjs` and
+opens the app). Or run it yourself:
+
 ```
 node tools/server.mjs
 ```
-Then open **http://localhost:8181** — not the GitHub Pages link. Leave that
-terminal window running in the background; it's what makes the one-click
-"Geocode" button work (see "Why a local server" below). Everything else
-about the app works the same whether you use this local URL or Pages —
-this only matters for the geocode step.
 
-1. **Upload a brand.** Sidebar → "Upload brand spreadsheet." Columns A–G must
-   be, in order: Store Full Name, Store Number, Store Address, City, County,
-   State, Zip Code. Every column after G is one SKU — any cell holding
-   anything other than `-` or blank counts as sold for that SKU.
-2. **Geocode it.** Click the 📍 button on the brand row. That's it — it
-   calls the local helper, which hits the U.S. Census Bureau's official
-   batch geocoder (free, no API key, no billing) and reports back matched
-   coordinates in a few seconds, no file to download or re-upload.
-3. **Compare.** Toggle brands on/off to overlay them on one map, or switch
-   to "Gap view" and pick a Has/Missing pair to see only the accounts that
-   carry one brand but not the other — a direct sales-call target list.
-4. **Export.** "Export current view to CSV" dumps whatever's currently
-   filtered/visible — one county, one gap comparison, whatever's on screen.
+Then open http://localhost:8181. The server listens on this computer only. It
+serves the app and answers `/api/geocode` for the one-click Geocode button.
 
-Uploading a brand a second time asks before replacing its existing data.
+The same app is also served from `accountatlas.pages.dev` (Cloudflare Pages,
+behind Cloudflare Access) and from GitHub Pages. Each address is a separate
+browser origin, so data uploaded at one does not appear at another. Use
+**Back up all lists** and **Import** to move data between them.
+
+Any static file server also works for everything except the Geocode button.
+
+## Using it
+
+1. **Upload a list.** Sidebar, "Upload brand spreadsheet". Row 1 is the header.
+   Columns A to G are Store Full Name, Store Number, Store Address, City, County,
+   State, Zip Code. Every column from H on is one SKU. Any cell other than `-` or
+   blank counts as sold, and the number in the cell is kept as the amount (cases)
+   for the volume heatmap. Uploading a list with the same name asks before
+   replacing it, and a file that fails validation never touches the old list.
+2. **Geocode it.** The pin button on the list row sends unmapped addresses to the
+   U.S. Census Bureau batch geocoder (free, no key). Addresses it cannot place
+   appear under "accounts not on map", where a second pass through OpenStreetMap
+   can try them.
+3. **Look.** Switch lists on and off with the chips above the map. The Shade bar
+   colors counties by Sold %, Volume total or Volume per account. Heat and Dots
+   switch the shading and the pins independently.
+4. **Search** by store name, city or address, tap a result to jump to it.
+5. **Route.** Tick "Add to route" on a store (or on a gray nearby business) to
+   build a numbered route of up to 10 stops. Optimize order, Start route in
+   Google Maps, or open the pre-visit **Brief**.
+6. **Priorities.** Your brand order, focus periods that bump brands to the top,
+   On-premise tags and the SKU matching rules. The Brief reads them.
+7. **Export.** The current view to CSV, one list as a snapshot, one list as a
+   standalone map page, or every list plus priorities in one backup file.
 
 ## Why a local server
 
-A browser button can never launch a program on your machine directly —
-that's a hard security boundary, not a limitation of this app. The fix is
-a small local process that stays running (`tools/server.mjs`): it serves
-the app itself AND exposes a `/api/geocode` endpoint the page can call
-same-origin, no CORS wall, no manual file round-trip.
+A browser cannot launch a program on your machine, a page served over https
+cannot call plain http://localhost, and neither the Census geocoder nor
+OpenStreetMap's search sends CORS headers, so a browser cannot call them
+directly. The local server is the small same-origin helper that makes the
+Geocode button work. If it is not running the app offers a manual fallback:
+export an address file, run `node tools/geocode.mjs that-file.csv`, import the
+resulting `.coords.json`.
 
-This is also why it has to be `http://localhost:8181` rather than the
-GitHub Pages URL — a page served over `https://` can't call a plain
-`http://localhost` endpoint either (browsers block that as mixed content),
-so the app needs to be served BY this same process for the button to
-reach it. Neither the Census Bureau's geocoder nor OpenStreetMap's
-Nominatim send `Access-Control-Allow-Origin` headers, so a direct browser
-`fetch()` to either is blocked outright regardless — confirmed directly
-against both before building this, not assumed.
+GitHub Pages is a plain static host with no server code, so it sends geocoding to
+a standalone Cloudflare Worker relay (`tools/cloudflare-worker.js`). Every other
+address uses its own `/api/geocode`.
 
-**Note:** `http://localhost:8181` and the GitHub Pages URL are different
-origins, so browser storage (IndexedDB) doesn't carry over between them —
-data uploaded/geocoded through one won't show up in the other. Use the
-local server as the primary way to run the app; Pages is there if you
-ever want to browse from a device where you don't want to run the
-command.
+## Development
 
-If the local server isn't running when you click Geocode, the app tells
-you and offers the old manual fallback (export a CSV, run
-`node tools/geocode.mjs that-file.csv`, import the resulting
-`.coords.json`) — same underlying Census API, just without the one-click
-convenience.
+No build step. Libraries are vendored in `vendor/` so the app has no CDN
+dependency (Leaflet 1.9.4, Leaflet.markercluster 1.5.3, SheetJS 0.18.5).
 
-## Cross-brand matching
-
-Accounts from different brand uploads are linked by normalized name +
-address similarity (see `src/data/matcher.js`), not by store number, since
-store numbers aren't guaranteed consistent across separate brand exports.
-High-confidence matches link automatically; medium-confidence ones surface
-in the "N matches need review" panel for a manual same-store/different-store
-call. Your calls persist in `localStorage` and are respected on every
-future match recompute.
-
-## Local development
-
-Any static file server works, e.g.:
 ```
-npx serve .
+npm test            unit tests for the pure modules and the Census client
+npm run bump        new cache-busting marker in index.html and every import
 ```
-Then open the printed localhost URL. No build step.
+
+After changing any file under `src/` or `index.html`, run `npm run bump` so
+browsers fetch the new files, then commit and push.
 
 ## Structure
 
-- `index.html` — shell, loads Leaflet, leaflet.markercluster, and SheetJS
-  from CDN (this is a real hosted site, not a sandboxed artifact, so CDN
-  scripts are fine here).
-- `src/core/db.js` — IndexedDB wrapper (brands, accounts, match groups,
-  geocode cache).
-- `src/data/excelParser.js` — the Excel → account-record pipeline.
-- `src/data/matcher.js` — cross-brand account matching.
-- `src/data/csvTools.js` — address export for geocoding, filtered-view
-  export, coordinate import.
-- `src/modules/mapView.js` — Leaflet map, county choropleth, marker
-  clustering, pin popups.
-- `src/app.js` — wires state, sidebar, and map together.
-- `data/geo/michigan-counties.geojson` — real Michigan county boundaries
-  (U.S. Census Bureau cartographic boundary files, public domain). No
-  account data.
-- `data/nearby/michigan-places.json` — named stores, gas stations, bars,
-  pubs and restaurants for the "Nearby businesses" layer. Public map data
-  from OpenStreetMap (© OpenStreetMap contributors, ODbL 1.0,
-  https://www.openstreetmap.org/copyright), extract by Geofabrik. No account
-  data. Rebuilt by `tools/buildNearbyPlaces.py`, which documents the refresh
-  steps.
-- `tools/buildNearbyPlaces.py` — builds the file above from a Michigan
-  `.osm.pbf` extract (needs `pip install osmium`).
-- `tools/server.mjs` — local server: serves the app at `http://localhost:8181`
-  and exposes `/api/geocode` for the in-app one-click Geocode button.
-- `tools/geocode.mjs` — standalone CLI fallback for the same Census
-  batch geocoder, used only if the local server isn't running.
+- `index.html` shell, `manifest.webmanifest` and `assets/icons/` for the app icon.
+- `src/app.js` state, sidebar, rendering, upload, import, geocoding, search, brief.
+- `src/core/db.js` IndexedDB wrapper (lists and accounts, single-transaction writes).
+- `src/core/util.js` escaping, county-name keys, downloads, script loading.
+- `src/data/excelParser.js` spreadsheet to account records.
+- `src/data/csvTools.js` CSV exports and coordinate-file import.
+- `src/data/snapshot.js` snapshot and backup files, standalone map viewer export.
+- `src/modules/mapView.js` map, county shading, pins, nearby businesses, store panel.
+- `src/modules/heatmap.js` volume bands and county totals.
+- `src/modules/priorities.js` brand order, focus periods, SKU matching rules.
+- `src/modules/brief.js` per-stop gaps in priority order.
+- `src/modules/route.js` route storage, shortest-path ordering, Maps link.
+- `data/geo/michigan-counties.geojson` Census county boundaries (public domain).
+- `data/nearby/michigan-places.json` named stores, bars and restaurants from
+  OpenStreetMap (ODbL 1.0, extract by Geofabrik), rebuilt by
+  `tools/buildNearbyPlaces.py`, whose docstring has the refresh steps.
+- `tools/server.mjs` local server. `tools/census.mjs` shared Census client used
+  by it and by `tools/geocode.mjs` (command-line fallback).
+- `functions/api/geocode.js` Cloudflare Pages relay, `tools/cloudflare-worker.js`
+  standalone Worker relay. Both carry their own copy of the Census logic because
+  they deploy as single files.
+- `tests/` unit tests, run with `npm test`.

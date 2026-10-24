@@ -25,7 +25,7 @@ button, input, select { font: inherit; color: inherit; }
 .wordmark .place { font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-dim); }
 .topbar .spacer { flex: 1; }
 .search {
-  display: flex; align-items: center; gap: 8px; width: 300px; max-width: 40vw;
+  position: relative; display: flex; align-items: center; gap: 8px; width: 300px; max-width: 40vw;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
   padding: 7px 11px; font-size: 13px;
 }
@@ -45,11 +45,13 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
 }
+.brand-row { flex-wrap: wrap; }
 .brand-row .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
-.brand-row .info { flex: 1; min-width: 0; cursor: pointer; }
-.brand-row .bname { font-size: 13.5px; }
+.brand-row .info { flex: 1; min-width: 0; }
+.brand-row .bname { font-size: 13.5px; overflow-wrap: anywhere; }
+.brand-actions { flex: 1 1 100%; display: flex; gap: 2px; padding-left: 21px; }
 .brand-row .bsub { font-size: 11px; color: var(--ink-dim); }
-.brand-row .icon-btn { border: none; background: none; color: var(--ink-dim); cursor: pointer; padding: 2px 4px; }
+.brand-row .icon-btn { border: none; background: none; color: var(--ink-dim); cursor: pointer; padding: 6px 4px; min-width: 28px; min-height: 34px; font-size: 15px; }
 
 .toggle { width: 30px; height: 17px; border-radius: 999px; background: var(--line); position: relative; flex: none; border: none; cursor: pointer; }
 .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 999px; background: var(--panel); transition: transform .15s ease; }
@@ -61,15 +63,7 @@ button, input, select { font: inherit; color: inherit; }
 .solid-btn { border: none; background: var(--accent); color: var(--accent-ink); border-radius: 7px; padding: 8px 12px; font-size: 12.5px; cursor: pointer; }
 .link-btn { border: none; background: none; color: var(--accent); font-size: 11.5px; cursor: pointer; padding: 0; text-align: left; }
 
-.segmented { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.segmented button { flex: 1; border: none; background: var(--panel-2); padding: 7px 6px; font-size: 12px; color: var(--ink-dim); cursor: pointer; border-left: 1px solid var(--line); }
-.segmented button:first-child { border-left: none; }
-.segmented button.active { background: var(--accent); color: var(--accent-ink); }
 
-.gap-form { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
-.gap-form .row { display: flex; align-items: center; gap: 8px; }
-.gap-form select { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font-size: 12.5px; }
-.gap-form .arrow { color: var(--ink-dim); }
 
 .filter-row { display: flex; flex-direction: column; gap: 6px; }
 .filter-row select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font-size: 13px; }
@@ -83,10 +77,6 @@ button, input, select { font: inherit; color: inherit; }
 .penetration-bar { height: 7px; border-radius: 999px; background: var(--unsold-bg); overflow: hidden; grid-column: 1 / -1; }
 .penetration-bar > div { height: 100%; background: var(--sold); }
 
-.legend { display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; }
-.legend-row { display: flex; align-items: center; gap: 9px; color: var(--ink-dim); }
-.legend-row .dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
-.legend-swatch { width: 22px; height: 8px; border-radius: 3px; flex: none; }
 
 .map-pane { position: relative; overflow: hidden; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* Everything that overlays the map lives in .map-stage, so the chip bar above
@@ -253,7 +243,6 @@ button, input, select { font: inherit; color: inherit; }
 .prio-count.zero { color: var(--unsold); }
 .prio-rule { width: 100%; padding: 4px 0 8px 30px; display: flex; flex-direction: column; gap: 4px; }
 .prio-note { font-size: 11.5px; color: var(--ink-dim); }
-.prio-bumped { font-size: 11px; color: var(--accent); }
 
 /* Pre-visit Brief (2026-10-23) */
 .brief-body { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
@@ -281,7 +270,7 @@ button, input, select { font: inherit; color: inherit; }
 .brief-warn { font-size: 12px; color: var(--ink-dim); background: var(--panel-2); border-radius: 7px; padding: 8px 10px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .hint { font-size: 11px; color: var(--ink-dim); }
-.warn-list { font-size: 11.5px; color: var(--unsold); max-height: 100px; overflow-y: auto; }
+.warn-list { white-space: pre-line; font-size: 11.5px; color: var(--unsold); max-height: 100px; overflow-y: auto; }
 
 .chip { font-size: 10.5px; padding: 3px 7px; border-radius: 999px; background: var(--sold-bg); color: var(--sold); display: inline-block; }
 .chip.unsold { background: var(--unsold-bg); color: var(--unsold); }
@@ -346,3 +335,28 @@ button, input, select { font: inherit; color: inherit; }
 /* Always, not just mobile -- a 300px fixed-width absolute panel can run
    off the edge of a genuinely narrow phone screen either way. */
 .detail-panel { width: min(300px, 92vw); }
+
+/* Search results dropdown under the top bar search box. */
+.search-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 1100; max-height: 60vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow);
+}
+.search-results[hidden] { display: none; }
+.search-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; min-height: 44px; padding: 7px 12px;
+  border: none; border-top: 1px solid var(--line); background: none; color: var(--ink); text-align: left; cursor: pointer;
+}
+.search-row:first-child { border-top: none; }
+.search-row:hover:not(:disabled), .search-row:focus-visible { background: var(--panel-2); }
+.search-row:disabled { opacity: 0.55; cursor: default; }
+.search-name { font-size: 13px; font-weight: 600; }
+.search-sub { font-size: 11px; color: var(--ink-dim); }
+.search-empty { padding: 10px 12px; font-size: 12px; color: var(--ink-dim); }
+
+/* Errors shown to the person instead of a silently dead page. */
+.app-error {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 3000; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; background: var(--unsold); color: #fff; font-size: 13px; box-shadow: var(--shadow);
+}
+.app-error[hidden] { display: none; }
+.app-error button { border: none; background: none; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; padding: 2px 8px; }
