@@ -1,42 +1,55 @@
-// Launch splash: the logo glyph spins inside its square in the middle of the
-// screen, then the whole logo flies to the header slot and the overlay fades.
-// Plays once per browser session. The markup is in index.html, the look and the
-// spin are in app.css (which also hides the overlay on its own if this file
-// never runs), and this file only measures the header slot and does the flight.
+// Launch splash: the Lottie intro plays in the middle of the screen, then the logo
+// flies to the header slot (a navy square fades in behind the glyph on the way) and
+// the overlay fades. Plays once per browser session.
+// A plain script loaded at the top of index.html so it starts before the app modules
+// download. The markup is in index.html, the look is in app.css (which also hides the
+// overlay on its own if this file never runs), and this file plays the animation and
+// does the flight.
 
-const SEEN_KEY = 'aa-splash-seen';
-const SPIN_MS = 1700;   // the aa-spin animation in app.css (1.6 s) plus a short hold
-const FLY_MS = 650;     // matches the transition on .splash-logo in app.css
+(function () {
+  const SEEN_KEY = 'aa-splash-seen';
+  const HOLD_MS = 250;      // pause on the finished animation before it flies
+  const FLY_MS = 650;       // matches the transitions on .splash-logo in app.css
+  const GIVE_UP_MS = 6500;  // if the animation never reports it finished, fly anyway
 
-function finish(splash) {
-  document.documentElement.classList.add('logo-ready');
-  splash.remove();
-}
-
-function run() {
   const root = document.documentElement;
   const splash = document.getElementById('splash');
-  if (!splash) return;
-  if (root.classList.contains('no-splash')) { splash.remove(); return; }
+
+  function finish() {
+    root.classList.add('logo-ready');
+    if (splash) splash.remove();
+  }
+
+  if (!splash) { root.classList.add('logo-ready'); return; }
+  if (root.classList.contains('no-splash') || typeof lottie === 'undefined' || !window.AA_INTRO) { finish(); return; }
   try { sessionStorage.setItem(SEEN_KEY, '1'); } catch (e) { /* private mode: it may replay, harmless */ }
 
-  const logo = splash.querySelector('.splash-logo');
-  const slot = document.getElementById('header-logo');
-  if (!logo || !slot) { finish(splash); return; }
+  const logo = document.getElementById('splash-logo');
+  const anim = lottie.loadAnimation({
+    container: document.getElementById('lottie-host'),
+    renderer: 'svg',
+    loop: false,
+    autoplay: true,
+    animationData: window.AA_INTRO,
+    rendererSettings: { preserveAspectRatio: 'xMidYMid meet' },
+  });
+  let flown = false;
 
-  // Time already spent loading counts toward the spin, so a slow start does not add a second wait.
-  const wait = Math.max(0, SPIN_MS - performance.now());
-  setTimeout(() => {
+  function fly() {
+    if (flown) return;
+    flown = true;
+    const slot = document.getElementById('header-logo');
+    if (!slot) { finish(); return; }
     const from = logo.getBoundingClientRect();
     const to = slot.getBoundingClientRect();
-    if (!to.width || !from.width) { finish(splash); return; }
+    if (!from.width || !to.width) { finish(); return; }
     const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
     const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
-    const scale = to.width / from.width;
     splash.classList.add('flying');
-    logo.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
-    setTimeout(() => finish(splash), FLY_MS + 80);
-  }, wait);
-}
+    logo.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + (to.width / from.width) + ')';
+    setTimeout(finish, FLY_MS + 80);
+  }
 
-run();
+  anim.addEventListener('complete', () => setTimeout(fly, HOLD_MS));
+  setTimeout(fly, GIVE_UP_MS);
+})();

@@ -12,7 +12,7 @@
 //
 // VERSION is rewritten by `npm run bump` together with the ?v= markers.
 
-const VERSION = '20261024f';
+const VERSION = '20261024h';
 const CACHE = `aa-shell-${VERSION}`;
 const NEARBY_DATA_VERSION = '20261020'; // keep equal to NEARBY_DATA_VERSION in src/modules/mapView.js
 const NETWORK_TIMEOUT_MS = 4000;
@@ -38,7 +38,9 @@ const SHELL = [
   v('src/modules/mapView.js'),
   v('src/modules/priorities.js'),
   v('src/modules/route.js'),
+  v('src/modules/introAnimation.js'),
   v('src/modules/splash.js'),
+  'vendor/lottie/lottie_light.min.js',
   'vendor/leaflet/leaflet.js',
   'vendor/leaflet/leaflet.css',
   'vendor/markercluster/leaflet.markercluster.js',

@@ -22,14 +22,18 @@
 <link rel="stylesheet" href="vendor/markercluster/MarkerCluster.css" />
 <link rel="stylesheet" href="vendor/markercluster/MarkerCluster.Default.css" />
 
-<link rel="stylesheet" href="assets/css/tokens.css?v=20261024f">
-<link rel="stylesheet" href="assets/css/app.css?v=20261024f">
-<link rel="stylesheet" href="assets/css/map.css?v=20261024f">
+<link rel="stylesheet" href="assets/css/tokens.css?v=20261024h">
+<link rel="stylesheet" href="assets/css/app.css?v=20261024h">
+<link rel="stylesheet" href="assets/css/map.css?v=20261024h">
 </head>
 <body>
 <div class="splash" id="splash" aria-hidden="true">
-  <span class="aa-logo splash-logo"><img class="sq" src="assets/icons/logo-square.png" alt=""><img class="gl" src="assets/icons/logo-glyph.png" alt=""></span>
+  <div class="splash-logo" id="splash-logo"><img class="sq" src="assets/icons/logo-square.png" alt=""><div class="lottie-host" id="lottie-host"></div></div>
 </div>
+<!-- Launch intro first, as plain scripts, so it starts before the app modules download. -->
+<script src="vendor/lottie/lottie_light.min.js"></script>
+<script src="src/modules/introAnimation.js?v=20261024h"></script>
+<script src="src/modules/splash.js?v=20261024h"></script>
 <div class="app-error" id="app-error" role="alert" hidden><span class="app-error-text"></span><button id="app-error-close" aria-label="Dismiss">&times;</button></div>
 <div class="app">
   <header class="topbar">
@@ -202,6 +206,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/markercluster/leaflet.markercluster.js"></script>
-<script type="module" src="src/app.js?v=20261024f"></script>
+<script type="module" src="src/app.js?v=20261024h"></script>
 </body>
 </html>
