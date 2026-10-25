@@ -7,7 +7,7 @@
 // otherwise the amounts in the master list itself. The two are never added
 // together, because the same product can sit in both files.
 
-import { effectiveOrder, matchSkus, activePreset } from './priorities.js?v=20261024f';
+import { effectiveOrder, matchSkus, activePreset } from './priorities.js?v=20261024i';
 
 // "Bota Box 3L Pinot Grigio 3L3" -> "Bota Box 3L Pinot Grigio": drop a trailing
 // item code (a last word that contains a digit) when something else remains.
