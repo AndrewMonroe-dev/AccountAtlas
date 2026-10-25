@@ -94,7 +94,6 @@ dependency (Leaflet 1.9.4, Leaflet.markercluster 1.5.3, SheetJS 0.18.5).
 npm test            unit tests for the pure modules and the Census client
 npm run test:e2e    browser suite (needs: npm install --no-save playwright-core,
                     and the local server running, see tests/e2e/browser.e2e.mjs)
-npm run test:splash  launch splash checks (same needs, see tests/e2e/splash.e2e.mjs)
 npm run bump        new cache-busting marker in index.html, every import and sw.js
 ```
 

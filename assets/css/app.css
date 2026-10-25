@@ -20,29 +20,24 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; align-items: center; gap: 20px; padding: 0 20px; height: 56px;
   border-bottom: 1px solid var(--line); background: var(--panel);
 }
-/* Header logo: the square and the glyph are two layers. The glyph layer is the full
-   square with transparent margins, so it overlays 1:1. */
-.aa-logo { position: relative; display: block; flex: none; aspect-ratio: 1; }
+/* Logo: the square and the glyph are two layers so the glyph can spin on its own.
+   The glyph layer is the full square with transparent margins, so it overlays 1:1. */
+.aa-logo { position: relative; display: block; flex: none; aspect-ratio: 1; perspective: 700px; }
 .aa-logo img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .header-logo { width: 34px; margin-right: -8px; }
 /* Hidden until the splash flight lands on it. The animation reveals it anyway if the script never runs. */
-html:not(.no-splash):not(.logo-ready) .header-logo { visibility: hidden; animation: aa-reveal 0s 8s forwards; }
+html:not(.no-splash):not(.logo-ready) .header-logo { visibility: hidden; animation: aa-reveal 0s 5s forwards; }
 
 .splash {
   position: fixed; inset: 0; z-index: 5000; display: grid; place-items: center;
   background: #0b1a33; pointer-events: none; transition: background-color .45s ease .2s;
-  animation: aa-splash-out .3s 8s forwards; /* failsafe if the script never runs */
+  animation: aa-splash-out .3s 5s forwards; /* failsafe if the script never runs */
 }
 .splash.flying { background-color: transparent; }
 .no-splash .splash { display: none; }
-/* The Lottie plays over a transparent stage. During the flight the navy square fades in behind it and the
-   animation shrinks to the header glyph's size (0.823 = header glyph width / Lottie glyph width). */
-.splash-logo { position: relative; width: min(70vw, 300px); aspect-ratio: 1; transition: transform .65s cubic-bezier(.5, 0, .2, 1); transform-origin: center; }
-.splash-logo .sq { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .45s ease; }
-.splash.flying .sq { opacity: 1; }
-.lottie-host { position: absolute; inset: 0; transition: transform .65s cubic-bezier(.5, 0, .2, 1); }
-.lottie-host svg { display: block; width: 100%; height: 100%; }
-.splash.flying .lottie-host { transform: translateY(-0.8%) scale(0.823); }
+.splash-logo { width: min(40vw, 170px); transition: transform .65s cubic-bezier(.5, 0, .2, 1); transform-origin: center; }
+.splash-logo .gl { animation: aa-spin 1.6s cubic-bezier(.1, .7, .2, 1) both; } /* fast start, long slow-down */
+@keyframes aa-spin { from { transform: rotateY(0); } to { transform: rotateY(1800deg); } }
 @keyframes aa-reveal { to { visibility: visible; } }
 @keyframes aa-splash-out { to { opacity: 0; visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .splash { display: none; } }
