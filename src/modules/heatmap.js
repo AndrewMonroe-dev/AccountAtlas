@@ -6,7 +6,7 @@
 // county's "total" is the sum over its accounts, its "average" is that total
 // divided by ALL the brand's accounts in the county (sold or not).
 
-import { normalizeCountyName } from '../core/util.js?v=20261024i';
+import { normalizeCountyName } from '../core/util.js?v=20261026a';
 
 const MODE_KEY = 'aa-heat-v1';
 const SKU_OFF_KEY = 'aa-heat-skus-v1';

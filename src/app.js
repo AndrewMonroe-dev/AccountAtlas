@@ -1,25 +1,25 @@
-import './modules/splash.js?v=20261024i';
-import * as db from './core/db.js?v=20261024i';
-import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261024i';
-import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261024i';
-import { diffLists, describeDiff } from './data/diff.js?v=20261024i';
-import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261024i';
-import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261024i';
+import { splashDone } from './modules/splash.js?v=20261026a';
+import * as db from './core/db.js?v=20261026a';
+import { escapeHtml, normalizeCountyName, loadScriptOnce, newId, parseLatLon, inMichigan } from './core/util.js?v=20261026a';
+import { parseBrandWorkbook, brandStats, normalizeAddressKey } from './data/excelParser.js?v=20261026a';
+import { diffLists, describeDiff } from './data/diff.js?v=20261026a';
+import { exportAddressesForGeocoding, importCoordinates, exportFilteredAccounts } from './data/csvTools.js?v=20261026a';
+import { exportBrandSnapshot, exportAllLists, exportStandaloneViewer, parseSnapshotFile } from './data/snapshot.js?v=20261026a';
 import {
   initMap, renderChoropleth, renderPins, flyToCounty, getMap, mapsUrlFor,
   renderRouteStops, showUserLocation, fitToPoints, focusAccount, setPinsVisible, closeDetailPanel, isDetailOpen,
   beginPlacement, cancelPlacement, isPlacing,
-} from './modules/mapView.js?v=20261024i';
+} from './modules/mapView.js?v=20261026a';
 import {
   countyHeat, formatAmount, loadHeatMode, saveHeatMode, loadHeatOn, saveHeatOn, loadDotsOn, saveDotsOn, loadSkuOff, saveSkuOff,
-} from './modules/heatmap.js?v=20261024i';
+} from './modules/heatmap.js?v=20261026a';
 import {
   IGNORE, norm, defaultPriorities, loadPriorities, savePriorities, cleanPriorities, flatOrder, todayString, matchSkus, moveEntry, addEntry, removeEntry, setOnPremise,
-} from './modules/priorities.js?v=20261024i';
-import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261024i';
+} from './modules/priorities.js?v=20261026a';
+import { buildBriefs, splitRows, shortSku, rankBestBets } from './modules/brief.js?v=20261026a';
 import {
   MAX_STOPS, LEG_SIZE, haversineMiles, optimizeOrder, pathMiles, googleRouteUrl, routeLegs, legUrl, stopFromAccount, stopFromPlace, placeStopId, loadRoute, saveRoute,
-} from './modules/route.js?v=20261024i';
+} from './modules/route.js?v=20261026a';
 
 const BRAND_COLORS = ['#a97a2e', '#35748c', '#6f5a70', '#4f7a4b', '#a1442f', '#7a5a9e'];
 
@@ -1675,6 +1675,7 @@ async function start() {
 
 async function main() {
   try {
+    await splashDone; // the splash gets the phone to itself, then the map and data load
     await start();
   } catch (err) {
     console.error(err);
