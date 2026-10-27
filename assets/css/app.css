@@ -35,9 +35,9 @@ html:not(.no-splash):not(.logo-ready) .header-logo { visibility: hidden; animati
 }
 .splash.flying { background-color: transparent; }
 .no-splash .splash { display: none; }
-/* will-change and backface-visibility give the flying logo and the spinning glyph their own GPU layers. */
+/* will-change gives the flying logo and the spinning glyph their own GPU layers. Never hide the backface: the glyph turns away from the viewer twice per turn and must stay visible. */
 .splash-logo { width: min(40vw, 170px); transition: transform .65s cubic-bezier(.5, 0, .2, 1); transform-origin: center; will-change: transform; }
-.splash-logo .gl { animation: aa-spin 1.6s cubic-bezier(.1, .7, .2, 1) both; will-change: transform; backface-visibility: hidden; } /* fast start, long slow-down */
+.splash-logo .gl { animation: aa-spin 1.6s cubic-bezier(.1, .7, .2, 1) both; will-change: transform; } /* fast start, long slow-down */
 .splash:not(.go) .splash-logo .gl { animation-play-state: paused; } /* waits for splash.js to decode the images */
 @keyframes aa-spin { from { transform: rotateY(0); } to { transform: rotateY(1800deg); } }
 @keyframes aa-reveal { to { visibility: visible; } }

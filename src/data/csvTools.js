@@ -1,4 +1,4 @@
-import { downloadBlob, safeFileName } from '../core/util.js?v=20261026a';
+import { downloadBlob, safeFileName } from '../core/util.js?v=20261027a';
 
 // CSV export for (a) addresses to hand to tools/geocode.mjs, and
 // (b) the current filtered account view, for a real call-sheet export.

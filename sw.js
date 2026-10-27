@@ -12,7 +12,7 @@
 //
 // VERSION is rewritten by `npm run bump` together with the ?v= markers.
 
-const VERSION = '20261026a';
+const VERSION = '20261027a';
 const CACHE = `aa-shell-${VERSION}`;
 const NEARBY_DATA_VERSION = '20261020'; // keep equal to NEARBY_DATA_VERSION in src/modules/mapView.js
 const NETWORK_TIMEOUT_MS = 4000;
